@@ -43,6 +43,18 @@ for _, back in ipairs({false, true}) do
 end
 local no_actions = setmetatable({card = {phrase = "palabra"}}, {__index = Viewer}):delivery_buttons()
 assert(not no_actions[1].enabled and not no_actions[2].enabled)
+local attempts = 0
+for _, kind in ipairs({"vocab", "learn"}) do
+    local card = {kind = kind, sent_to_anki = true, anki_note_id = 123}
+    local viewer = setmetatable({card = card, on_send = function() attempts = attempts + 1 end}, {__index = Viewer})
+    local action = viewer:delivery_buttons()[2]
+    assert(action.text == "✓ Enviada a Anki" and not action.enabled)
+    action.callback()
+    assert(attempts == 0)
+    card.anki_sync_state = "missing"
+    action = viewer:delivery_buttons()[2]
+    assert(action.text == "No está en Anki" and not action.enabled)
+end
 local highlighted = false
 local button = {setText = function(self, text) self.text = text end,
     disable = function(self) self.disabled = true end, refresh = function() end}
@@ -56,3 +68,46 @@ actions[3].callback()
 assert(button.disabled and highlighted and with_highlight.show_back == false)
 assert(not with_highlight:delivery_buttons()[3].enabled)
 print("PASS: Save/Send available on both sides, without flipping; failures allow retry")
+local live, online, deleted, sent, confirmed = "present", true, 0, 0, 0
+package.loaded["ui/network/manager"] = {isOnline = function() return online end,
+    runWhenOnline = function(_, fn) fn() end}
+package.loaded.settings_state = {merge = function() return {} end}
+package.loaded.card_storage.load_anki_settings = function() return {} end
+package.loaded.anki_note_actions = {
+    status = function() return live, not live and "unreachable" or nil end,
+    confirm_delete = function(_, _, cb)
+        confirmed = confirmed + 1
+        -- Simulate the confirmation box: no deletion until this is called.
+        package.loaded.anki_note_actions.confirm = function() deleted = deleted + 1; live = "absent"; cb(true, "deleted") end
+    end,
+}
+for _, back in ipairs({false, true}) do
+    local btn = {setText = function(self, text) self.text = text end, refresh = function() end,
+        enable = function(self) self.disabled = false end, disable = function(self) self.disabled = true end}
+    local viewer = setmetatable({anki_base = {}, card = {sent_to_anki = true, anki_note_id = 42}, show_back = back,
+        button_table = {getButtonById = function(_, id) return id == "send" and btn or nil end},
+        on_send = function() sent = sent + 1; live = "present"; return true end}, {__index = Viewer})
+    live = "present"
+    viewer:refresh_anki_status()
+    assert(btn.text == "Eliminar de Anki…" and not btn.disabled)
+    local before = deleted
+    viewer:delivery_buttons()[2].callback()
+    assert(deleted == before and confirmed > 0)
+    package.loaded.anki_note_actions.confirm()
+    assert(deleted == before + 1 and btn.text == "Enviar a Anki")
+    viewer:delivery_buttons()[2].callback()
+    assert(sent > 0 and btn.text == "Eliminar de Anki…")
+    live = "absent" -- Deleted outside the plugin after the last refresh.
+    local previous = sent
+    viewer:delivery_buttons()[2].callback()
+    assert(sent == previous and btn.text == "Enviar a Anki")
+    online = false
+    viewer:refresh_anki_status()
+    assert(btn.text == "Verificar en Anki" and not viewer.anki_status)
+    online, live = true, nil
+    viewer:refresh_anki_status()
+    viewer:delivery_buttons()[2].callback()
+    assert(sent == previous and viewer.anki_status_error == "unreachable")
+    assert(viewer.show_back == back)
+end
+print("PASS: live Send/Delete button on both sides, confirmation, external deletion, offline and no action reversal")

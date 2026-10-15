@@ -435,6 +435,7 @@ function CardManager.show(base_config, filter_book, ui, target)
                 end
                 local annotation_actions = Annotations.viewer_actions(ui or {}, card)
                 v = CardViewer:new {
+                    anki_base = base_config,
                     card      = card,
                     show_back = show_back,
                     read_only = false,
@@ -590,18 +591,27 @@ function CardManager.show(base_config, filter_book, ui, target)
             dialog = ButtonDialog:new {
                 title   = card.phrase or "",
                 buttons = {
-                    {{ text = _("Send to Anki"), callback = function()
+                    {{ text = card.anki_note_id and _("Eliminar de Anki…") or _("Enviar a Anki"), callback = function()
                         UIManager:close(dialog)
+                        if card.anki_note_id then
+                            NetworkMgr:runWhenOnline(function()
+                                require("anki_note_actions").confirm_delete(base_config, card, function(ok, message)
+                                    if ok then refresh() end
+                                    UIManager:show(InfoMessage:new {text = message})
+                                end)
+                            end)
+                            return
+                        end
                         if send_one(anki_config, card, base_config) then
                             notify(_("Sent!"))
                             refresh()
                         end
                     end }},
-                    {{ text = _("Delete"), callback = function()
+                    {{ text = _("Eliminar del Kobo…"), callback = function()
                         UIManager:close(dialog)
                         UIManager:show(ConfirmBox:new {
-                            text        = _("Delete '") .. (card.phrase or "") .. _("'?"),
-                            ok_text     = _("Delete"),
+                            text        = _("¿Eliminar solo la copia del Kobo?\n\n") .. (card.phrase or "") .. _("\n\nNo se eliminará de Anki."),
+                            ok_text     = _("Eliminar del Kobo"),
                             ok_callback = function()
                                 CardStorage.delete_card(idx)
                                 refresh()

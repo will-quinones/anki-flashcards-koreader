@@ -19,6 +19,7 @@ function Learning.show(base, card, ui)
         local viewer
         local annotation_actions = Annotations.viewer_actions(ui or {}, card)
         viewer = Viewer:new {
+            anki_base = base,
             card = card, show_back = back or false, read_only = card.sent_to_anki == true,
             on_show_answer = function() if current then UIManager:close(current) end; open(true) end,
             on_show_question = function() if current then UIManager:close(current) end; open(false) end,

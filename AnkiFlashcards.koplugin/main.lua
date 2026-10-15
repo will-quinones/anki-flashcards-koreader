@@ -368,6 +368,7 @@ function AnkiFlashcards:init()
                         local annotation_actions = Annotations.viewer_actions(ui, c)
                         v = CardViewer:new {
                             card      = c,
+                            anki_base = CONFIGURATION,
                             show_back = show_back_flag or false,
                             on_add_highlight = annotation_actions.on_add_highlight,
                             is_highlighted = annotation_actions.is_highlighted,

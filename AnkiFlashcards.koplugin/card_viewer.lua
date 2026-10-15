@@ -92,9 +92,62 @@ local CardViewer = InputContainer:extend {
     button_padding = Size.padding.default,
 }
 
+function CardViewer:refresh_anki_status()
+    if not self.anki_base or self._anki_closed then return end
+    local Storage = require("card_storage")
+    local config = require("settings_state").merge(self.anki_base, Storage.load_anki_settings())
+    if require("ui/network/manager"):isOnline() then
+        self.anki_status, self.anki_status_error = require("anki_note_actions").status(config, self.card)
+    else
+        self.anki_status, self.anki_status_error = nil, _("Sin conexión. No se pudo verificar el estado en Anki.")
+    end
+    local button = self.button_table and self.button_table:getButtonById("send")
+    if button and not self._anki_closed then
+        button:setText(self.anki_status == "present" and _("Eliminar de Anki…")
+            or self.anki_status == "absent" and _("Enviar a Anki") or _("Verificar en Anki"), button.width)
+        if self.anki_status == "present" or self.on_send or not self.anki_status then button:enable() else button:disable() end
+        button:refresh()
+    end
+    return self.anki_status
+end
+
+function CardViewer:anki_action()
+    local intended = self.anki_status
+    local status = self:refresh_anki_status()
+    if not status then
+        UIManager:show(InfoMessage:new {text = self.anki_status_error or _("No se pudo verificar Anki.")})
+        return
+    end
+    -- A refresh must not turn a user's Send tap into a Delete (or vice versa).
+    if status ~= intended then return end
+    if status == "present" then
+        require("anki_note_actions").confirm_delete(self.anki_base, self.card, function(ok, message)
+            if not self._anki_closed then self:refresh_anki_status() end
+            UIManager:show(InfoMessage:new {text = message})
+        end)
+    elseif self.on_send then
+        local ok, err = self.on_send()
+        self:refresh_anki_status()
+        local save = self.button_table and self.button_table:getButtonById("save")
+        if ok and save then save:setText(_("✓ Guardada"), save.width); save:disable(); save:refresh() end
+        UIManager:show(InfoMessage:new {text = ok and _("Enviada a Anki.") or (err or _("No se pudo enviar."))})
+    end
+end
+
 function CardViewer:delivery_buttons()
     local CardStorage = require("card_storage")
     local already_saved = self.card and CardStorage.is_saved(self.card)
+    local function sent()
+        return self.card and self.card.sent_to_anki and self.card.anki_note_id ~= nil
+    end
+    local function send_label()
+        if self.anki_base then
+            return self.anki_status == "present" and _("Eliminar de Anki…")
+                or self.anki_status == "absent" and _("Enviar a Anki") or _("Verificar en Anki")
+        end
+        if self.card and self.card.anki_sync_state == "missing" then return _("No está en Anki") end
+        return sent() and _("✓ Enviada a Anki") or _("Enviar a Anki")
+    end
     local function update_saved_button()
         local button = self.button_table and self.button_table:getButtonById("save")
         if button then
@@ -121,15 +174,27 @@ function CardViewer:delivery_buttons()
         },
         {
             id = "send",
-            text = _("Enviar a Anki"),
-            enabled = self.on_send ~= nil,
+            text = send_label(),
+            enabled = self.anki_base ~= nil or (not sent() and self.on_send ~= nil),
             callback = function()
-                if not self.on_send then return end
+                if self.anki_base then
+                    require("ui/network/manager"):runWhenOnline(function()
+                        if not self._anki_closed then self:anki_action() end
+                    end)
+                    return
+                end
+                if sent() or not self.on_send then return end
                 local ok, err = self.on_send()
                 if ok then
                     -- Sending also persists the card locally. Reflect that on
                     -- either side without closing or flipping the viewer.
                     if self.card and CardStorage.is_saved(self.card) then update_saved_button() end
+                    local button = self.button_table and self.button_table:getButtonById("send")
+                    if button then
+                        button:setText(_("✓ Enviada a Anki"), button.width)
+                        button:disable()
+                        button:refresh()
+                    end
                     UIManager:show(Notification:new {text = _("Enviada a Anki.")})
                 else
                     UIManager:show(InfoMessage:new {text = _("Anki: ") .. (err or _("No se pudo enviar.")), timeout = 5})
@@ -571,6 +636,7 @@ function CardViewer:update(new_card, new_show_back)
         on_viewer_updated     = self.on_viewer_updated,
         on_save               = self.on_save,
         on_send               = self.on_send,
+        anki_base             = self.anki_base,
         on_regenerate         = self.on_regenerate,
         on_update             = self.on_update,
         on_regen_ipa          = self.on_regen_ipa,
@@ -591,15 +657,22 @@ end
 -- ── Event handlers ────────────────────────────────────────────────────────────
 
 function CardViewer:onCloseWidget()
+    self._anki_closed = true
     UIManager:setDirty(nil, function()
         return "partial", self.frame.dimen
     end)
 end
 
 function CardViewer:onShow()
+    self._anki_closed = false
     UIManager:setDirty(self, function()
         return "partial", self.frame.dimen
     end)
+    if self.anki_base then
+        UIManager:scheduleIn(0, function()
+            if not self._anki_closed then self:refresh_anki_status() end
+        end)
+    end
     return true
 end
 
