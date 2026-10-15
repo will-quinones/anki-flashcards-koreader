@@ -102,7 +102,8 @@ local function show_stats()
     local title_str = _("Estadísticas — ") .. tostring(total_all) .. (total_all == 1 and _(" tarjeta") or _(" tarjetas"))
     table.insert(stat_items, 1, {text = sent_all .. _(" enviadas · ") .. (total_all - sent_all - review_all)
         .. _(" pendientes · ") .. review_all .. _(" por revisar")})
-    UIManager:show(Menu:new { title = title_str, item_table = stat_items })
+    UIManager:show(Menu:new { title = title_str, item_table = stat_items, is_borderless = true,
+        onReturn = function(self) UIManager:close(self) end })
 end
 
 -- ── Management submenu ────────────────────────────────────────────────────────
@@ -190,7 +191,8 @@ local function show_recovery_report(base_config, report)
         if #report.errors > 0 then text = text .. "\n\n" .. table.concat(report.errors, "\n") end
         UIManager:show(InfoMessage:new {text = text})
     end}
-    menu = Menu:new {title = _("Recuperación desde Anki"), item_table = items,
+    menu = Menu:new {title = _("Recuperación desde Anki"), item_table = items, is_borderless = true,
+        onReturn = function(self) UIManager:close(self) end,
         onMenuSelect = function(_, item) if item.select_enabled ~= false and item.callback then item.callback() end; return true end}
     UIManager:show(menu)
 end
@@ -247,6 +249,7 @@ function CardManager.show_manage(base_config, opts, collect)
         },
         {
             text = _("Recuperar desde Anki"),
+            keep_menu_open = true,
             callback = function() CardManager.recover_from_anki(base_config) end,
         },
         {
@@ -312,6 +315,8 @@ function CardManager.show_manage(base_config, opts, collect)
     manage_menu = Menu:new {
         title      = _("Manage"),
         item_table = item_table,
+        is_borderless = true,
+        onReturn = function(self) UIManager:close(self) end,
     }
     UIManager:show(manage_menu)
 end
@@ -328,13 +333,13 @@ CardManager.show_stats = show_stats
 
 -- ── Card list with optional book filter ───────────────────────────────────────
 
-function CardManager.show(base_config, filter_book, ui, target)
+function CardManager.show(base_config, filter_book, ui, target, on_back)
     local anki_config = effective_config(base_config)
     local menu_instance
 
     local function refresh()
         if menu_instance then UIManager:close(menu_instance) end
-        CardManager.show(base_config, filter_book, ui)
+        CardManager.show(base_config, filter_book, ui, nil, on_back)
     end
 
     local all_cards  = CardStorage.load_cards()
@@ -342,8 +347,8 @@ function CardManager.show(base_config, filter_book, ui, target)
 
     -- ── Filter entry ──────────────────────────────────────────────────────────
     local filter_label = filter_book
-                         and (_("Filter: ") .. filter_book .. _(" (tap to clear)"))
-                         or  _("Filter: All Books")
+                         and (_("Libro: ") .. filter_book .. _(" (toca para ver todos)"))
+                         or  _("Libro: todos · Learn y Vocab")
     table.insert(item_table, {
         text = filter_label,
         bold = true,
@@ -351,7 +356,7 @@ function CardManager.show(base_config, filter_book, ui, target)
             if filter_book then
                 -- Clear filter.
                 if menu_instance then UIManager:close(menu_instance) end
-                CardManager.show(base_config, nil, ui)
+                CardManager.show(base_config, nil, ui, nil, on_back)
                 return
             end
             -- Build book picker from stored cards.
@@ -368,7 +373,7 @@ function CardManager.show(base_config, filter_book, ui, target)
                 table.insert(book_buttons, {{ text = bref, callback = function()
                     UIManager:close(picker)
                     if menu_instance then UIManager:close(menu_instance) end
-                    CardManager.show(base_config, bref, ui)
+                    CardManager.show(base_config, bref, ui, nil, on_back)
                 end }})
             end
             table.insert(book_buttons, {{ text = _("Cancel"),
@@ -408,19 +413,31 @@ function CardManager.show(base_config, filter_book, ui, target)
         })
     end
 
+    -- Fit each logical line at a fixed font size so the source fragment never
+    -- gets pushed out by a long generated question or book title.
+    local fit_line
+    if #cards > 0 and not target then
+        local Screen = require("device").screen
+        local TextWidget = require("ui/widget/textwidget")
+        local face = require("ui/font"):getFace("smallinfofont", 20)
+        local margin = Screen:scaleBySize(100)
+        local max_width = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.9) - margin
+        fit_line = function(text)
+            local widget = TextWidget:new {text = text, face = face, max_width = max_width}
+            local fitted, truncated = widget:getFittedText()
+            widget:free()
+            return fitted .. (truncated and "…" or "")
+        end
+    end
     for i, card in ipairs(cards) do
         local idx    = source_indices[i]
-        local prefix = card.sent_to_anki and "+ " or ""
+        local prefix = card.sent_to_anki and "↗ " or "○ "
         local warnings = {missing = _("[No encontrada] "), unverified_missing = _("[Revisar origen] "),
             unverified_scope = _("[Revisar origen] "), out_of_scope = _("[Fuera de ámbito] "),
             conflict = _("[Conflicto] "), unverified_change = _("[Revisar] "),
             identity_conflict = _("[Identidad distinta] "), remote_changed = _("[Cambió en Anki] "), local_changed = _("[Cambio local] ")}
         prefix = warnings[card.anki_sync_state] or prefix
-        local book   = (card.book_title and card.book_title ~= "")
-                       and card.book_title or _("Unknown book")
-        local label  = prefix .. (card.kind == "learn" and "[Learn] " or "[Vocab] ")
-                       .. (card.phrase or "") .. "  —  "
-                       .. book .. "  (" .. (card.date or "") .. ")"
+        local label = not target and require("card_list_preview").label(card, prefix, fit_line) or ""
 
         local function open_viewer()
             if target and target.annotation_source then Annotations.bind(card, target.annotation_source) end
@@ -464,6 +481,7 @@ function CardManager.show(base_config, filter_book, ui, target)
                         local cur = viewer_ref[1]
                         if cur then UIManager:close(cur) end
                         if menu_instance then UIManager:close(menu_instance) end
+                        if ui.menu and ui.menu.onCloseReaderMenu then ui.menu:onCloseReaderMenu() end
                         local event_name = ui.paging and "GotoPage" or "GotoXPointer"
                         ui:handleEvent(Event:new(event_name, card.highlight_pos0))
                     end or nil,
@@ -629,24 +647,36 @@ function CardManager.show(base_config, filter_book, ui, target)
         if target then open_viewer(); return end
         table.insert(item_table, {
             text          = label,
+            card_preview  = require("card_list_preview").parts(card, prefix),
             callback      = open_viewer,
             hold_callback = open_context_menu,
         })
     end
 
     if target then notify_error(_("La tarjeta ya no está guardada. Actualiza la lista de anotaciones.")); return end
-    local count_label = #cards == 1
-                        and _("1 card")
-                        or  (tostring(#cards) .. _(" cards"))
-    if filter_book then count_label = count_label .. _(" (filtered)") end
+    local count_label = tostring(#cards) .. _(" de ") .. #all_cards
 
+    local ListRows = require("card_list_rows")
     menu_instance = Menu:new {
-        title      = _("My Cards (") .. count_label .. ")",
+        title      = _("Mis tarjetas (") .. count_label .. ")",
+        subtitle = _("↗ Enviada a Anki · ○ Solo Kobo"),
+        is_borderless = true,
+        onReturn = function(self)
+            UIManager:close(self)
+            if filter_book then CardManager.show(base_config, nil, ui, nil, on_back)
+            elseif on_back then on_back() end
+        end,
+        perpage = 6,
+        items_font_size = 20,
+        single_line = false,
+        multilines_forced = true,
+        multilines_show_more_text = false,
         item_table = item_table,
         onMenuHold = function(self, item)
             if item and item.hold_callback then item.hold_callback() end
         end,
     }
+    ListRows.install(menu_instance)
     UIManager:show(menu_instance)
 end
 

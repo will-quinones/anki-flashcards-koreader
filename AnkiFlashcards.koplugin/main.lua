@@ -616,14 +616,19 @@ function AnkiFlashcards:init()
     end)
 
     -- ── Entry 3: My Cards ─────────────────────────────────────────────────────
-    self.ui.highlight:addToHighlightDialog("ankiflashcards_3", function(_rhi)
+    self.ui.highlight:addToHighlightDialog("ankiflashcards_3", function(rhi, index)
         return {
             text    = _("My Cards"),
             enabled = true,
             callback = function()
-                local book_title = clean_str(self.ui.document:getProps().title, MAX_TITLE)
+                local selection = rhi.selected_text and require("util").tableDeepCopy(rhi.selected_text)
                 self.ui.highlight:onClose()
-                CardManager.show(CONFIGURATION, book_title, self.ui)
+                CardManager.show(CONFIGURATION, nil, self.ui, nil, function()
+                    if not self.ui.tearing_down and selection then
+                        rhi.selected_text = selection
+                        rhi:onShowHighlightMenu(index)
+                    end
+                end)
             end,
         }
     end)
@@ -798,6 +803,7 @@ function AnkiFlashcards:addToMainMenu(menu_items)
                     })
                     table.insert(items, 1, {
                         text = _("Mis tarjetas"),
+                        keep_menu_open = true,
                         callback = function()
                             CardManager.show(CONFIGURATION, nil, self.ui)
                         end,
@@ -807,6 +813,7 @@ function AnkiFlashcards:addToMainMenu(menu_items)
             },
             {
                 text = _("Estadísticas por libro"),
+                keep_menu_open = true,
                 callback = CardManager.show_stats,
             },
         },
