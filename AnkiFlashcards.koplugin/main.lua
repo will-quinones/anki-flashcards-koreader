@@ -629,8 +629,7 @@ function AnkiFlashcards:init()
     end)
 
     -- ── Tap-to-Show Flashcard ─────────────────────────────────────────────────
-    -- Short tap on a highlight with a saved card → show card viewer directly.
-    -- No saved card → fall through to original highlight menu.
+    -- Saved cards never intercept a highlight tap: keep the usual action menu.
     local highlight_module = self.ui.highlight
     HighlightMenu.install(highlight_module)
     local orig_onTap = highlight_module.onTap
@@ -662,122 +661,11 @@ function AnkiFlashcards:init()
                     local cards = CardStorage.load_cards()
                     local vocab = Annotations.find_card(snapshot, "vocab", cards, true)
                     local learn = Annotations.find_card(snapshot, "learn", cards, true)
-                    if vocab and learn then
+                    if vocab or learn then
                         hl_self.selected_text = require("util").tableDeepCopy(ann)
                         hl_self:onShowHighlightMenu(box.index)
                         return true
                     end
-                    local card = vocab or learn
-                    if card then
-                        Annotations.bind(card, Annotations.capture(self.ui, ann))
-                        if card.kind == "learn" then
-                            Learning.show(CONFIGURATION, card, self.ui)
-                            return true
-                        end
-                        local hl_index = box.index
-                        local viewer_ref = {}
-                        local function make_viewer(show_back)
-                            local v
-                            if not card.image_path or card.image_path == "" then
-                                local latest = CardStorage.find_by_phrase(card.phrase)
-                                if latest and latest.image_path and latest.image_path ~= "" then card.image_path = latest.image_path end
-                            end
-                            local annotation_actions = Annotations.viewer_actions(self.ui, card)
-                            v = CardViewer:new {
-                                card      = card,
-                                show_back = show_back,
-                                read_only = false,
-                                on_add_highlight = annotation_actions.on_add_highlight,
-                                is_highlighted = annotation_actions.is_highlighted,
-                                can_add_highlight = annotation_actions.can_add_highlight,
-                                on_show_answer = function()
-                                    -- Close whichever viewer is currently showing
-                                    -- (may differ from v after an async image update).
-                                    local cur = viewer_ref[1] or v
-                                    UIManager:close(cur)
-                                    viewer_ref[1] = make_viewer(true)
-                                end,
-                                on_show_question = function()
-                                    UIManager:close(viewer_ref[1] or v)
-                                    viewer_ref[1] = make_viewer(false)
-                                end,
-                                on_viewer_updated = function(updated) viewer_ref[1] = updated end,
-                                on_save = function()
-                                    return nil, _("Already saved")
-                                end,
-                                on_send = function()
-                                    return AnkiSync.send_card(get_anki_config(), card, CONFIGURATION)
-                                end,
-                                on_regen_image = ImageGenerator.is_enabled(CONFIGURATION) and function()
-                                    if not card.image_prompt or card.image_prompt == "" then
-                                        UIManager:show(Notification:new {
-                                            text    = _("No image prompt available"),
-                                            timeout = 3,
-                                        })
-                                        return
-                                    end
-                                    local old_image = card.image_path
-                                    UIManager:show(Notification:new {
-                                        text    = _("Generando imagen…"),
-                                        timeout = 60,
-                                    })
-                                    ImageGenerator.generate_async(
-                                        CONFIGURATION,
-                                        card.image_prompt,
-                                        card.phrase,
-                                        function(img_path)
-                                            if old_image and old_image ~= "" then
-                                                os.remove(old_image)
-                                            end
-                                            card.image_path = img_path
-                                            CardStorage.update_image_path(card.phrase, img_path)
-                                            if Feedback.is_top(viewer_ref[1]) then
-                                                viewer_ref[1] = viewer_ref[1]:update(card)
-                                            end
-                                            UIManager:show(Notification:new {
-                                                text    = _("New image loaded!"),
-                                                timeout = 3,
-                                            })
-                                        end,
-                                        function(err)
-                                            UIManager:show(Notification:new {
-                                                text    = _("Imagen: ") .. Feedback.image_message(err),
-                                                timeout = 5,
-                                            })
-                                        end
-                                    )
-                                end,
-                                on_highlight_dialog = function()
-                                    hl_self:showHighlightDialog(hl_index)
-                                end,
-                            }
-                            UIManager:show(v)
-                            return v
-                        end
-                        viewer_ref[1] = make_viewer(false)
-                        -- Auto-regenerate image if missing (e.g. synced card).
-                        local saved_img_cfg = make_image_config(card)
-                        if (not card.image_path or card.image_path == "")
-                           and can_generate_image(card, saved_img_cfg)
-                           and not (ImageGenerator.is_pending and ImageGenerator.is_pending(card.phrase))
-                           and NetworkMgr:isOnline() then
-                            ImageGenerator.generate_async(
-                                saved_img_cfg,
-                                card.image_prompt,
-                                card.phrase,
-                                function(img_path)
-                                    card.image_path = img_path
-                                    CardStorage.update_image_path(card.phrase, img_path)
-                                    if Feedback.is_top(viewer_ref[1]) then
-                                        viewer_ref[1] = viewer_ref[1]:update(card)
-                                    end
-                                end,
-                                nil  -- silent on error
-                            )
-                        end
-                        return true
-                    end
-
                     -- ── Quick Lookup for purple highlights ───────────────
                     if ann.color == "purple" and ann.text and ann.text ~= "" then
                         local phrase_text = ann.text

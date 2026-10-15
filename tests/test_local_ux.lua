@@ -105,6 +105,26 @@ dict_buttons.ankiflashcards_learn.callback(popup)
 assert(learning_started == 1)
 print("PASS: single-word dictionary action preserves selection without forcing a highlight")
 
+-- A saved Vocab, Learn, or both must keep the same highlight action menu.
+local annotations = require("annotation_tools")
+local capture, find = annotations.capture, annotations.find_card
+annotations.capture = function() return {} end
+stub("util", {tableDeepCopy = function(t) local c = {}; for k,v in pairs(t) do c[k] = v end; return c end})
+reader.ui.annotation = {annotations = {{text = "fragmento", pos0 = "start", pos1 = "end"}}}
+highlight.ui = reader.ui
+highlight.view = {highlight = {visible_boxes = {{index = 1, rect = {x = 0, y = 0, w = 50, h = 50}}}},
+    screenToPageTransform = function(_, pos) return pos end}
+local menus = 0
+highlight.onShowHighlightMenu = function(_, index) assert(index == 1); menus = menus + 1 end
+package.loaded.learning.show = function() error("A highlight tap must not open a saved card") end
+for _, saved in ipairs({"vocab", "learn", "both"}) do
+    annotations.find_card = function(_, kind) return (saved == kind or saved == "both") and {kind = kind} or nil end
+    assert(highlight:onTap(nil, {pos = {x = 10, y = 10}}) == true)
+end
+assert(menus == 3 and highlight.selected_text.text == "fragmento")
+annotations.capture, annotations.find_card = capture, find
+print("PASS: saved Vocab/Learn highlights keep their full native action menu, without auto-opening cards")
+
 -- Older KOReader versions without dictionary extension API still load normally.
 local legacy = instance({menu = menu, highlight = highlight, dictionary = {}})
 legacy:init()
