@@ -89,8 +89,9 @@ Al tocar un subrayado existente que normalmente abriría la barra compacta de
 edición, se abre directamente el menú completo de acciones, sin pasar por
 los tres puntos. **Editar subrayado** conserva la barra original de estilo,
 color, notas y ajuste de límites. No se modifica el código de KOReader ni se
-recrean los subrayados. La apertura de tarjetas ya asociadas y de notas conserva
-su comportamiento previo.
+recrean los subrayados. Tener una tarjeta Vocab/Learn guardada no abre su modal
+al tocar el subrayado: se mantiene el menú habitual y la tarjeta se abre solo
+al elegir explícitamente la acción Anki correspondiente.
 
 ## Crear y usar tarjetas
 
@@ -100,8 +101,12 @@ su comportamiento previo.
 3. Revisa la propuesta. Para Learn, seleccionar una frase o párrafo suele
    ser más útil que seleccionar una palabra aislada.
 4. **Mostrar respuesta** revela el reverso y **Mostrar pregunta** vuelve al
-   anverso sin regenerar contenido. **Guardar** y **Enviar a Anki**
-   están disponibles en ambas caras.
+   anverso sin regenerar contenido. **Guardar** y el botón dinámico de Anki
+   están disponibles en ambas caras: **Enviar a Anki** si la nota no existe,
+   **Eliminar de Anki…** si ya existe. El borrado siempre pide confirmación y
+   conserva la copia local. Sin conexión o con un origen no verificable aparece
+   **Verificar en Anki**, sin asumir que la nota falta. Se comprueba al abrir
+   y antes de actuar, no mediante consultas continuas en segundo plano.
 5. Guardar conserva la tarjeta en el lector. Enviar también la guarda
    localmente, con el ID de la nota y el estado de entrega.
    **Subrayar** es una acción opcional disponible en la vista previa: generar
@@ -110,7 +115,18 @@ su comportamiento previo.
    el libro original con posiciones válidas; no se reconstruyen posiciones
    inexistentes de tarjetas recuperadas desde Anki.
 6. Abre **Mis tarjetas** para revisar, filtrar por libro, enviar o eliminar
-   tarjetas. La lista distingue `[Vocab]` y `[Learn]`.
+   tarjetas. Ambos accesos abren todos los libros; el título indica visibles/total.
+   La lista distingue `[Vocab]` y `[Learn]` y muestra el fragmento original en una
+   segunda línea más pequeña, separado de la pregunta; debajo aparece el libro y la fecha.
+   **↗** indica enviada a Anki y **○**, guardada solo en el Kobo (último estado confirmado).
+   Las listas no tienen borde exterior y usan la flecha de retorno nativa para
+   volver al apartado anterior, conservando el menú principal abierto.
+   Las líneas largas se recortan con puntos suspensivos sin reducir la fuente.
+   Si una tarjeta antigua no conserva su selección, aparece «Fragmento no disponible».
+   Mantener pulsada una fila permite
+   distinguir **Eliminar del Kobo…** de **Eliminar de Anki…**. El borrado remoto
+   exige la API de AnkiConnect con protección de sesión; si no está disponible,
+   se rechaza y se indica que se elimine desde Anki. No hay borrado remoto automático.
 
 El idioma controla la tarjeta completa, no solo la traducción de una
 definición. Para tarjetas monolingües en español, usa `Spanish` y texto en español.
@@ -131,21 +147,27 @@ saturado, evitando enviar una petición fallida por cada subrayado restante.
 
 ### Generar desde las anotaciones del libro
 
-Abre **Herramientas → Anki Flashcards → Tarjetas → Crear tarjetas desde
-anotaciones**, con el libro abierto. La ventana incluye todas las anotaciones
+Abre **Herramientas → Anki Flashcards → Tarjetas → Aprendizaje desde
+anotaciones**, con el libro abierto. Este apartado crea exclusivamente tarjetas
+de aprendizaje (Learn); Vocab sigue disponible en la selección y el diccionario.
+La ventana incluye todas las anotaciones
 con texto o nota asociada, paginadas para no desbordar la pantalla:
 
-- A la izquierda: casilla de selección, extracto y estado **V / L** de las
-  tarjetas guardadas. Mantén pulsado para leer el fragmento y la nota completos.
-- A la derecha: **Generar Anki**, o **Ver tarjetas** si ya existen ambas.
-  Elige Vocab o Learn; las existentes se abren sin volver a generar.
-- Al pie: **Generar todas (N)** (o Generar para una selección parcial) y
+- A la izquierda: casilla de selección independiente y de ancho fijo.
+- En el centro: extracto en una sola línea, con tamaño de letra y altura
+  uniformes; el texto largo se recorta, no encoge. Toca o mantén pulsado el
+  texto para leer el fragmento y la nota completos.
+- A la derecha: icono **+** para generar y guardar, o **✓** para abrir directamente
+  la tarjeta Learn ya guardada en el Kobo, sin nueva generación. No indica envío a Anki.
+  No hay selector de tipo, indicadores V/L ni opciones Vocab en la pulsación larga.
+- Al pie: **Generar seleccionadas (N)** y
   **Marcar todas / Desmarcar todas**. La selección abarca todas las páginas.
+  Se preseleccionan las anotaciones que todavía no tienen Learn.
 - Las anotaciones sin un fragmento/posición utilizables siguen visibles, pero
   no generan citas inventadas. Una nota personal sin fragmento no se considera
   texto del libro.
 
-Antes de iniciar se confirma tipo y cantidad y se avisa del consumo de cuota.
+Antes de iniciar se confirma la cantidad y se avisa del consumo de cuota.
 Las tarjetas generadas se guardan localmente para revisarlas; no se envían
 automáticamente a Anki. En Learn se extrae contexto nativo y, tras el aviso,
 las notas asociadas pueden orientar la pregunta, pero no sirven como citas.

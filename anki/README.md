@@ -6,6 +6,30 @@ Este complemento utiliza dos tipos internos automáticos, no perfiles ni
 ajustes configurables. Ambos se crean al primer envío si faltan y se validan
 sin sobrescribir tipos existentes. Las instrucciones manuales son opcionales.
 
+## Diseño de lectura
+
+Los dos tipos comparten un diseño minimalista: fondo marfil, texto oscuro,
+acento verde discreto, alineación izquierda y una columna de hasta 640 px.
+La tipografía y el espaciado se adaptan a móvil; el modo nocturno de Anki cambia
+a una paleta oscura con contraste equivalente. No se descargan fuentes ni se
+ejecuta JavaScript. Los campos opcionales vacíos no dejan etiquetas sueltas.
+
+Learn reserva el anverso para la pregunta. En el reverso destacan la respuesta
+y la explicación, seguidas de la cita comprobada y su procedencia. Los bloques
+«Explicación» y «Cita del libro» tienen títulos discretos y separación adicional
+para distinguir la explicación generada de la cita literal. La selección
+original se puede desplegar, sin mostrar el contexto completo ni PluginID.
+Vocab prioriza significado y frase con hueco; el reverso revela la expresión,
+pronunciación y sus extras opcionales (imagen/audio/fuente). Encabezado,
+definición y posición inicial de la frase se conservan al revelar; la palabra
+y el IPA aparecen debajo del ejercicio, nunca insertados antes de él.
+
+La definición visual compartida vive en
+[`card_design.lua`](../AnkiFlashcards.koplugin/card_design.lua); los JSON de esta
+carpeta contienen el mismo diseño, verificado por pruebas. Editar estos archivos
+no sobrescribe tipos ya existentes: los cambios en Anki se aplican expresamente
+a sus plantillas y CSS, sin renombrar campos, recrear notas ni alterar repasos.
+
 ## KOReader Vocabulary — Anki Vocab
 
 **Tipo: Cloze**, con una plantilla que utiliza `{{cloze:Text}}`. No lo crees

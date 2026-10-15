@@ -1,5 +1,106 @@
 # Cambios locales
 
+## Corrección de superposición en Mis tarjetas (IMG_0408)
+
+Se usaba `perpage`, que KOReader recalcula desde la preferencia global y por
+tanto ignora como ajuste de entrada. Se sustituye por `items_per_page`, calculado
+con la altura real de las tres fuentes y margen vertical, y refinado con el área
+disponible del menú. Ya no se asigna a tres líneas el espacio de una fila simple.
+La flecha nativa de retorno se mantiene habilitada para este padre externo.
+
+Corrección instalada en el Kobo el 2026-10-15 (`20261015-001345`), sin respaldos.
+Archivos/sintaxis validados y configuración, tarjetas e imágenes sin cambios.
+Requiere reiniciar KOReader completamente para reemplazar el código ya cargado.
+
+## Diseño minimalista de los dos tipos de Anki
+
+Vocab corregido mediante MCP para evitar el salto al revelar: mismo encabezado,
+definición y ejercicio en ambas caras; palabra e IPA pasan debajo de la frase
+y los sinónimos. Se conserva el cloze y no se cambia contenido de las notas.
+
+Refinado en Learn mediante MCP: títulos «Explicación» y «Cita del libro» con
+separación adicional; si solo hay selección, se etiqueta «Fragmento seleccionado».
+Los títulos opcionales desaparecen junto con su campo vacío. No se cambió el
+contenido ni el diseño de Vocabulary en este refinamiento.
+
+Aplicado mediante MCP de Anki a KOReader Vocabulary y KOReader Learn: tipografía
+de sistema, columna legible, fondo marfil, acento verde y modo nocturno. Móvil
+sin desbordamiento horizontal. Learn conserva la pregunta sola delante y la
+respuesta destacada detrás, con explicación/cita/procedencia y selección original
+desplegable. Vocab mantiene cloze, pronunciación, imágenes/audio y enlace de fuente.
+No se modificaron campos, notas ni programación de repasos. No se sincronizó con AnkiWeb.
+
+Definición compartida en card_design.lua y payloads JSON actualizados, con pruebas
+de igualdad, separación pregunta/respuesta, referencias de campos y contraste.
+Los archivos locales del plugin aún no se han actualizado en el Kobo; los tipos
+actuales de Anki ya tienen el diseño y no requieren reinstalar el plugin.
+
+## Navegación y filas nativas sin borde
+
+Las listas Mis tarjetas, gestión, recuperación y estadísticas usan el modo
+oficial `is_borderless` y la flecha nativa `onReturn`. Desde el menú principal
+se conserva abierto el apartado anterior; desde el menú de subrayado se restaura
+su selección al volver. El listado usa «↗» para enviada y «○» para solo Kobo,
+con leyenda en el subtítulo, en vez de `[Enviada]`.
+
+Se corrige el aplanado de saltos de línea que realiza MenuItem: solo se sustituye
+su contenido de texto por tres renglones, conservando foco, gestos y paginación
+nativos. Pregunta a 20, fragmento en segunda línea a 17, libro/fecha a 15.
+
+Instalado en el Kobo el 2026-10-14 (revisión local `20261014-235055`), sin
+crear respaldos. Sintaxis y archivos verificados; configuración, tarjetas e
+imágenes sin cambios. Pendiente de reiniciar KOReader y validar visualmente.
+
+## Respaldos durante el desarrollo
+
+Por petición del usuario se eliminó `/mnt/onboard/.adds/ankiflashcards-config-backups`
+del Kobo. Durante esta fase de desarrollo y pruebas no crear nuevos respaldos
+de configuración al instalar. Seguir conservando configuración, claves,
+tarjetas e imágenes y verificar su integridad antes/después de actualizar.
+
+## Mis tarjetas y estado de Anki
+
+Ambos accesos a Mis tarjetas abren todos los libros y los dos tipos. El título
+muestra visibles/total y el filtro indica su ámbito. El visor consulta Anki al
+abrirse y antes de actuar: «Eliminar de Anki…» si la nota existe, «Enviar a Anki»
+si no existe, o «Verificar en Anki» si no se pudo comprobar. Funciona en ambas
+caras. Una caída de red nunca se interpreta como una nota ausente, ni un cambio
+de estado convierte un toque de Enviar en un borrado o viceversa.
+
+Mantener pulsada una fila permite «Eliminar de Anki…» con confirmación, validación
+de perfil/tipo/identidad, sesión protegida y revalidación de cambios. Conserva
+la copia local y bloquea reenvíos automáticos. «Eliminar del Kobo…» se distingue
+del borrado remoto. Si AnkiConnect no admite la API protegida, el borrado se
+rechaza sin recurrir a la operación antigua sin protección.
+
+Instalado en el Kobo el 2026-10-14 (revisión local `20261014-233905`).
+Configuración, tarjetas e imágenes verificadas sin cambios; no se han borrado
+notas reales. Pendiente de reiniciar KOReader y validar visualmente.
+
+Al tocar un subrayado con Vocab, Learn o ambos ya guardados se abre el menú de
+acciones habitual. La tarjeta solo se abre al elegir una acción Anki explícita;
+no se alteran los subrayados ni el atajo de consulta rápida de los no asociados.
+
+## Anotaciones exclusivamente de aprendizaje
+
+La opción se llama «Aprendizaje desde anotaciones» y genera solo Learn, sin
+selector ni acciones Vocab ocultas. Las tres columnas separan casilla, extracto
+y acción: «+» genera/guarda; «✓» abre directamente la tarjeta Learn guardada.
+No hay indicadores V/L ni etiquetas de estado junto al texto. Casillas e iconos
+tienen anchos fijos, todas las celdas la misma altura y los extractos una fuente
+única sin encogimiento ni salto de línea. El texto completo se abre al tocarlo
+o mantenerlo pulsado. Se preseleccionan las pendientes y se desmarcan las
+completadas al terminar. Las acciones manuales de selección/diccionario
+conservan Anki Vocab y Anki Learn sin cambios.
+
+Mis tarjetas usa filas de fuente fija con pregunta/estado, fragmento original
+en su propia línea, y libro/fecha. Cada línea se ajusta por ancho real sin
+reducir la fuente. Se usa selected_text o la selección de procedencia local;
+para Learn antiguo sin selección se indica que el fragmento no está disponible.
+
+Instalado en el Kobo el 2026-10-14 (revisión local `20261014-233905`).
+Pendiente de reiniciar KOReader y validar visualmente.
+
 ## Subrayado opcional y anotaciones por lote
 
 Guardar/Enviar tienen al lado **Subrayar** en la vista previa cuando existe
@@ -8,9 +109,8 @@ verifica el libro y no duplica subrayados existentes (incluidas posiciones
 PDF restauradas desde JSON). Generar Vocab ya no subraya automáticamente.
 
 La ventana de anotaciones usa filas con selección/extracto a la izquierda y
-acción Anki a la derecha, paginación y controles generales al pie. Muestra
-estados Vocab/Learn, permite abrir tarjetas existentes, seleccionar todas o
-solo algunas y elegir el tipo para la operación sin perfiles ni defaults.
+acción de aprendizaje a la derecha, paginación y controles generales al pie.
+Permite abrir tarjetas Learn existentes, seleccionar todas o solo algunas.
 Incluye notas con texto; las no ancladas a fragmentos válidos se señalan.
 
 El lote confirma consumo, usa contexto directo del documento, guarda sin
