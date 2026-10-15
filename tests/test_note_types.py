@@ -56,6 +56,11 @@ def test_minimal_design_preserves_fields_and_answer_separation():
         if model["isCloze"]:
             assert "{{Phrase}}" not in template["Front"]
             assert "{{Sound}}" in template["Back"]
+            # No answer-only block may push the definition or exercise down.
+            exercise = template["Front"].split("{{#ImageFront}}", 1)[0]
+            assert template["Back"].startswith(exercise)
+            assert template["Back"].index("{{Phrase}}") > template["Back"].index("{{cloze:Text}}")
+            assert template["Back"].index("{{IPA}}") > template["Back"].index("{{cloze:Text}}")
         else:
             assert "{{Question}}" in template["Front"]
             for name in ("Answer", "Explanation", "SourceExcerpt", "SelectedText", "Context", "PluginID"):
