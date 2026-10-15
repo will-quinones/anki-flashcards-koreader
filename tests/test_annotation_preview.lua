@@ -21,6 +21,7 @@ end}
 local ui = {document = {file = "/book.epub", getProps = function() return {title = "Libro", authors = "Autor"} end},
     annotation = {annotations = {}}}
 for i = 1, 9 do ui.annotation.annotations[i] = {text = "Anotación número " .. i, pos0 = "start" .. i, pos1 = "end" .. i, drawer = "lighten"} end
+ui.annotation.annotations[3].text = string.rep("Fragmento muy largo áéíóú ", 40)
 ui.annotation.annotations[10] = {note = "Una nota personal sin fragmento"}
 local first, second = A.capture(ui, ui.annotation.annotations[1]), A.capture(ui, ui.annotation.annotations[2])
 cards = {{phrase = "primera", origin_key = first.origin_key}, {kind = "learn", card_id = first.origin_key, phrase = "Pregunta"},
@@ -29,36 +30,56 @@ local Inbox = require("highlight_inbox")
 assert(#Inbox.collect(ui) == 10)
 Inbox.show(ui, {})
 local preview = dialog
-assert(#preview.buttons[1] == 2 and preview.buttons[1][1].width > 400 and preview.buttons[1][2].text == "Ver tarjetas")
-assert(preview.buttons[#preview.buttons][1].text == "Generar todas (8)")
-assert(preview.buttons[#preview.buttons][2].text == "Desmarcar todas")
-preview.buttons[1][2].callback()
-assert(dialog.buttons[1][1].text == "Ver Anki Vocab" and dialog.buttons[2][1].text == "Ver Anki Learn")
-dialog.buttons[2][1].callback()
+assert(#preview.buttons[1] == 3 and preview.buttons[1][3].icon == "check")
+assert(preview.buttons[2][3].icon == "plus") -- A Vocab card doesn't count as learning.
+assert(preview.title:find("Aprendizaje desde anotaciones", 1, true) and not preview.title:find("Vocab", 1, true))
+for i = 1, 6 do
+    local row = preview.buttons[i]
+    assert(row[1].width == 48 and row[3].width == 52)
+    assert(row[1].height == 32 and row[2].height == 32 and row[3].height == 32)
+    assert(row[1].font_size == 20 and row[2].font_size == 20)
+    assert(row[1].avoid_text_truncation == false and row[2].avoid_text_truncation == false)
+    assert(row[1].text == (i == 1 and "☐" or "☑"))
+    assert(not row[2].text:find("[V", 1, true) and not row[2].text:find("creada", 1, true))
+end
+assert(preview.buttons[#preview.buttons][1].text == "Generar seleccionadas (8)")
+assert(preview.buttons[#preview.buttons][2].text == "Marcar todas")
+preview.buttons[1][3].callback()
 assert(opened.kind == "learn" and generated == nil)
+preview.buttons[3][2].callback()
+assert(info == ui.annotation.annotations[3].text) -- Full text is never lost to truncation.
+assert(preview.buttons[#preview.buttons][1].hold_callback == nil)
 preview.buttons[#preview.buttons][2].callback()
 while #queue > 0 do table.remove(queue, 1)() end
 preview = dialog
-assert(preview.buttons[#preview.buttons][1].text == "Generar (0)")
+assert(preview.buttons[#preview.buttons][1].text == "Generar seleccionadas (9)")
 preview.buttons[#preview.buttons][2].callback()
 while #queue > 0 do table.remove(queue, 1)() end
 preview = dialog
-assert(preview.buttons[#preview.buttons][1].text == "Generar todas (8)")
+assert(preview.buttons[#preview.buttons][1].text == "Generar seleccionadas (0)")
+preview.buttons[#preview.buttons][2].callback()
+while #queue > 0 do table.remove(queue, 1)() end
+preview = dialog
+assert(preview.buttons[#preview.buttons][1].text == "Generar seleccionadas (9)")
 preview.buttons[#preview.buttons - 1][3].callback()
 while #queue > 0 do table.remove(queue, 1)() end
 preview = dialog
 assert(preview.title:find("2/2", 1, true))
-assert(preview.buttons[4][2].enabled == false and preview.buttons[4][2].text == "Sin fragmento")
-preview.buttons[4][1].hold_callback()
+assert(preview.buttons[4][3].enabled == false and preview.buttons[4][1].text == "—")
+preview.buttons[4][2].hold_callback()
 assert(info:find("nota personal", 1, true))
 preview.buttons[#preview.buttons][1].callback()
-dialog.buttons[1][1].callback() -- Vocab: skips the already-existing second source.
-assert(confirm.text:find("Crear 7 tarjetas", 1, true) and generated == nil)
+assert(confirm.text:find("Crear 8 tarjetas de aprendizaje", 1, true) and generated == nil)
+assert(not confirm.text:find("Vocab", 1, true) and not confirm.text:find("imágenes", 1, true))
 confirm.ok_callback()
-assert(generated.kind == "vocab" and #generated.snapshots == 8)
+assert(generated.kind == "learn" and #generated.snapshots == 9)
 dialog.buttons[1][1].callback() -- Cancel progress.
 while #queue > 0 do table.remove(queue, 1)() end
 assert(cancelled)
-finish_batch({generated = 0, existing = 0, invalid = 0, failed = 0, remaining = 8, cancelled = true, cards = {}, errors = {}})
+finish_batch({generated = 0, existing = 0, invalid = 0, failed = 0, remaining = 9, cancelled = true, cards = {}, errors = {}})
 assert(info:find("cancelada", 1, true))
-print("PASS: paged annotation rows, right-side actions, typed status, global selection footer, preview and cancellation")
+preview = dialog
+assert(preview.buttons[#preview.buttons][1].text == "Generar seleccionadas (8)")
+preview.buttons[1][3].callback()
+assert(confirm.text:find("Crear 1 tarjetas de aprendizaje", 1, true))
+print("PASS: learning-only annotations, saved/generate icons, fixed checkbox/text/action cells, pagination and cancellation")

@@ -1,11 +1,10 @@
--- Paged annotation preview: selection on the left, Anki action on the right.
+-- Learning-only annotation preview: fixed checkbox, excerpt and action columns.
 local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
 local UI = require("ui/uimanager")
 local Network = require("ui/network/manager")
 local Device = require("device")
-local Size = require("ui/size")
 local Storage = require("card_storage")
 local A = require("annotation_tools")
 local Batch = require("annotation_generation")
@@ -50,7 +49,7 @@ function Inbox.show(ui, base)
     local function statuses(cards)
         local result = {}
         for index, entry in ipairs(entries) do
-            result[index] = {vocab = A.find_card(entry.snapshot, "vocab", cards), learn = A.find_card(entry.snapshot, "learn", cards)}
+            result[index] = A.find_card(entry.snapshot, "learn", cards) or false
         end
         return result
     end
@@ -61,20 +60,20 @@ function Inbox.show(ui, base)
         if not entry.valid then text = text .. "\n\n" .. entry.reason end
         UI:show(require("ui/widget/textviewer"):new {title = "Anotación", text = text})
     end
-    local function start(selected, kind, single)
+    local function start(selected, single)
         local cards, fresh, existing, invalid = Storage.load_cards(), 0, 0, 0
         local snapshots = {}
         for _, entry in ipairs(selected) do
             snapshots[#snapshots+1] = entry.snapshot
             if not entry.valid then invalid = invalid + 1
-            elseif A.find_card(entry.snapshot, kind, cards) then existing = existing + 1
+            elseif A.find_card(entry.snapshot, "learn", cards) then existing = existing + 1
             else fresh = fresh + 1 end
         end
-        if fresh == 0 then message(existing .. " ya tienen tarjeta de ese tipo; " .. invalid .. " no tienen texto válido."); return end
+        if fresh == 0 then message(existing .. " ya tienen tarjeta de aprendizaje; " .. invalid .. " no tienen texto válido."); return end
         UI:show(ConfirmBox:new {
-            text = "Crear " .. fresh .. " tarjetas Anki " .. (kind == "learn" and "Learn" or "Vocab") .. " en el Kobo.\n\n"
-                .. existing .. " ya existentes se omitirán. Puede consumir cuota del proveedor y, en Vocab, de imágenes si están activadas."
-                .. "\n\nSe enviarán los fragmentos y su contexto a la IA. En Learn también se usan tus notas como orientación, no como citas."
+            text = "Crear " .. fresh .. " tarjetas de aprendizaje en el Kobo.\n\n"
+                .. existing .. " ya existentes se omitirán. Puede consumir cuota del proveedor de texto."
+                .. "\n\nSe enviarán los fragmentos y su contexto a la IA. Tus notas se usan como orientación, no como citas."
                 .. "\n\nNo se envían a Anki automáticamente. Si hay tarjetas solo en el ordenador, usa primero Recuperar desde Anki.",
             ok_text = "Generar", ok_callback = function()
                 Network:runWhenOnline(function()
@@ -91,8 +90,12 @@ function Inbox.show(ui, base)
                         UI:show(progress)
                     end
                     local err
-                    job, err = Batch.start(ui, base, snapshots, kind, function(report)
+                    job, err = Batch.start(ui, base, snapshots, "learn", function(report)
                         if progress then UI:close(progress) end
+                        local current = Storage.load_cards()
+                        for i, entry in ipairs(entries) do
+                            if A.find_card(entry.snapshot, "learn", current) then state.selected[i] = false end
+                        end
                         if not ui.tearing_down and A.same_book(ui, entries[1].snapshot) then render() else state.closed = true end
                         if single and report.generated == 1 and report.cards[1] then
                             require("card_manager").open_card(base, report.cards[1], ui)
@@ -111,35 +114,15 @@ function Inbox.show(ui, base)
             end,
         })
     end
-    local function choose(selected, single)
-        local picker
-        local function option(kind, label)
-            local existing
-            if single then existing = A.find_card(selected[1].snapshot, kind, Storage.load_cards()) end
-            return {text = existing and ("Ver " .. label) or ("Crear " .. label), callback = function()
-                UI:close(picker)
-                if existing then
-                    A.bind(existing, selected[1].snapshot)
-                    require("card_manager").open_card(base, existing, ui)
-                else start(selected, kind, single) end
-            end}
-        end
-        picker = ButtonDialog:new {title = "¿Qué tarjetas quieres crear?", buttons = {
-            {option("vocab", "Anki Vocab")}, {option("learn", "Anki Learn")},
-            {{text = "Cancelar", callback = function() UI:close(picker) end}},
-        }}
-        UI:show(picker)
-    end
     render = function()
         if state.closed then return end
         close_dialog()
         local status = statuses(Storage.load_cards())
         local selectable, selected_count = {}, 0
         for index, entry in ipairs(entries) do
-            local complete = status[index].vocab and status[index].learn
-            if entry.valid and not complete then
+            if entry.valid then
                 selectable[#selectable+1] = index
-                if state.selected[index] == nil then state.selected[index] = true end
+                if state.selected[index] == nil then state.selected[index] = not status[index] end
                 if state.selected[index] then selected_count = selected_count + 1 end
             else state.selected[index] = false end
         end
@@ -147,24 +130,37 @@ function Inbox.show(ui, base)
         state.page = math.max(1, math.min(state.page, pages))
         local rows = {}
         local width = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.94)
-        local inner = width - 2 * Size.border.window - 2 * Size.padding.button
+        local function scaled(n) return Screen.scaleBySize and Screen:scaleBySize(n) or n end
+        local cell_height, icon_size = scaled(32), scaled(24)
+        local checkbox_width, action_width = scaled(48), scaled(52)
         for index = (state.page - 1) * page_size + 1, math.min(#entries, state.page * page_size) do
             local i, entry = index, entries[index]
-            local done = status[i].vocab and status[i].learn
-            local check = not entry.valid and "! " or (done and "✓ " or (state.selected[i] and "☑ " or "☐ "))
-            local flags = " [V" .. (status[i].vocab and "✓" or "—") .. " L" .. (status[i].learn and "✓" or "—") .. "]"
+            local check = not entry.valid and "—" or (state.selected[i] and "☑" or "☐")
             local selection = entry.snapshot.selection
             local summary = type(selection.text) == "string" and selection.text:match("%S") and selection.text or selection.note
             rows[#rows+1] = {
-                {text = check .. preview(summary, 34) .. flags,
-                    align = "left", width = math.floor(inner * 0.72),
+                {text = check, width = checkbox_width, height = cell_height,
+                    font_size = 20, font_bold = false, avoid_text_truncation = false, enabled = entry.valid,
+                    allow_hold_when_disabled = true,
                     callback = function()
-                        if not entry.valid or done then full_text(entry); return end
+                        if not entry.valid then full_text(entry); return end
                         state.selected[i] = not state.selected[i]; redraw()
                     end,
                     hold_callback = function() full_text(entry) end},
-                {text = not entry.valid and "Sin fragmento" or (done and "Ver tarjetas" or "Generar Anki"), enabled = entry.valid,
-                    callback = function() choose({entry}, true) end},
+                {text = preview(summary, 160), align = "left", height = cell_height,
+                    font_size = 20, font_bold = false, avoid_text_truncation = false,
+                    callback = function() full_text(entry) end,
+                    hold_callback = function() full_text(entry) end},
+                {icon = status[i] and "check" or "plus", enabled = entry.valid,
+                    width = action_width, height = cell_height, icon_width = icon_size, icon_height = icon_size,
+                    callback = function()
+                        local existing = A.find_card(entry.snapshot, "learn", Storage.load_cards())
+                        if existing then
+                            A.bind(existing, entry.snapshot)
+                            require("card_manager").open_card(base, existing, ui)
+                        else start({entry}, true) end
+                    end,
+                    hold_callback = function() full_text(entry) end},
             }
         end
         rows[#rows+1] = {
@@ -173,18 +169,20 @@ function Inbox.show(ui, base)
             {text = "Siguiente ›", enabled = state.page < pages, callback = function() state.page = state.page + 1; redraw() end},
         }
         rows[#rows+1] = {
-            {text = (selected_count > 0 and selected_count == #selectable and "Generar todas (" or "Generar (") .. selected_count .. ")", enabled = selected_count > 0, callback = function()
+            {text = "Generar seleccionadas (" .. selected_count .. ")", enabled = selected_count > 0,
+                font_size = 18, avoid_text_truncation = false, callback = function()
                 local selected = {}; for _, i in ipairs(selectable) do if state.selected[i] then selected[#selected+1] = entries[i] end end
-                if #selected > 0 then choose(selected, false) end
+                if #selected > 0 then start(selected, false) end
             end},
             {text = #selectable > 0 and selected_count == #selectable and "Desmarcar todas" or "Marcar todas",
+                font_size = 18, avoid_text_truncation = false,
                 enabled = #selectable > 0, callback = function()
                     local value = selected_count ~= #selectable
                     for _, i in ipairs(selectable) do state.selected[i] = value end
                     redraw()
                 end},
         }
-        dialog = ButtonDialog:new {title = "Anotaciones (" .. #entries .. ") · " .. state.page .. "/" .. pages .. "\nV: Vocab · L: Learn · mantener pulsado para leer",
+        dialog = ButtonDialog:new {title = "Aprendizaje desde anotaciones (" .. #entries .. ") · " .. state.page .. "/" .. pages .. "\n+ Generar · ✓ Abrir guardada · mantener texto para leer",
             width = width, buttons = rows, tap_close_callback = function() state.closed = true end}
         UI:show(dialog)
     end

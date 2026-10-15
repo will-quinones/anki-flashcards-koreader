@@ -283,7 +283,7 @@ function CardManager.show_manage(base_config, opts, collect)
             end,
         },
         {
-            text     = _("Crear tarjetas desde anotaciones"),
+            text     = _("Aprendizaje desde anotaciones"),
             bold     = true,
             enabled  = opts and opts.on_inbox ~= nil or false,
             callback = function()
