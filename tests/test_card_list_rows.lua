@@ -32,3 +32,30 @@ menu:updateItems(2)
 check()
 assert(updated == 1 and freed == 2)
 print("PASS: true separate source line at smaller font, native gestures/focus preserved, and pagination rerenders safely")
+
+-- KOReader ignores 'perpage' at initialization: items_per_page must override
+-- the user's global density, with enough physical space at every DPI.
+local scale, screen_height = 1, 1000
+package.loaded.device = {screen = {scaleBySize = function(_, n) return n * scale end,
+    getHeight = function() return screen_height end}}
+package.loaded["ui/widget/textwidget"] = {new = function(_, spec)
+    return {getSize = function() return {h = spec.face.size * scale} end, free = function() end}
+end}
+assert(Rows.per_page() == 6)
+scale, screen_height = 2, 1448
+assert(Rows.per_page() == 6)
+local count = Rows.per_page(600)
+assert(count == 3 and 600 / count >= (20 + 17 + 15 + 24) * scale)
+assert(Rows.per_page(200) == 1)
+local enabled = 0
+local actual = {available_height = 600, item_group = {}, onReturn = function() end,
+    page_return_arrow = {enable = function() enabled = enabled + 1 end}}
+actual.updateItems = function(self)
+    self.perpage = self.items_per_page or 18 -- actual native setting precedence
+    self.item_height = self.available_height / self.perpage
+end
+Rows.install(actual)
+assert(actual.items_per_page == 3 and actual.perpage == 3 and actual.item_height >= 152)
+actual:updateItems()
+assert(enabled == 2)
+print("PASS: measured DPI-aware row heights override global density via items_per_page; native back remains enabled")

@@ -40,9 +40,9 @@ package.loaded["ui/widget/textwidget"] = {new = function(_, spec)
         free = function() freed = freed + 1 end}
 end}
 require("card_manager").show({}, nil, nil, nil, function() returned = returned + 1 end)
-assert(menu.perpage == 6 and menu.items_font_size == 20 and menu.multilines_forced and not menu.multilines_show_more_text)
+assert(menu.items_per_page == 6 and menu.perpage == nil and menu.items_font_size == 20 and menu.multilines_forced and not menu.multilines_show_more_text)
 assert(menu.item_table[2].text:find("\n«Fragmento original»\n", 1, true))
-assert(fitted == 3 and freed == 3)
+assert(fitted == 3 and freed == 6)
 assert(menu.is_borderless and menu.onReturn and menu.item_table[2].card_preview[2] == "«Fragmento original»")
 assert(not menu.item_table[2].text:find("[Enviada]", 1, true))
 menu:onReturn()

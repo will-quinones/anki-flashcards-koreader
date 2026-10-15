@@ -666,7 +666,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
             if filter_book then CardManager.show(base_config, nil, ui, nil, on_back)
             elseif on_back then on_back() end
         end,
-        perpage = 6,
+        items_per_page = ListRows.per_page(),
         items_font_size = 20,
         single_line = false,
         multilines_forced = true,
