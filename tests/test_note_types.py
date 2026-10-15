@@ -62,6 +62,10 @@ def test_minimal_design_preserves_fields_and_answer_separation():
                 assert "{{" + name + "}}" not in template["Front"]
             assert "{{Answer}}" in template["Back"] and "{{SourceExcerpt}}" in template["Back"]
             assert "{{PluginID}}" not in template["Back"] and "{{Context}}" not in template["Back"]
+            assert '{{#Explanation}}<section class="explanation-block"><h2 class="section-label">Explicación</h2>' in template["Back"]
+            assert '{{#SourceExcerpt}}<h2 class="section-label">Cita del libro</h2>' in template["Back"]
+            assert '{{^SourceExcerpt}}{{#SelectedText}}<h2 class="section-label">Fragmento seleccionado</h2>' in template["Back"]
+            assert '.explanation-block{margin-top:36px}' in model["css"]
 
 
 def test_design_text_contrast_in_light_and_dark():
