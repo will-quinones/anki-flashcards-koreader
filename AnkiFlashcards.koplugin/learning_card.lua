@@ -50,9 +50,9 @@ function Learn.from_note(note)
         anki_note_id = note.noteId, anki_model = Learn.MODEL, imported_from_anki = true}
 end
 function Learn.model_params()
+    local design = require("card_design").learning()
     return {modelName = Learn.MODEL, inOrderFields = Learn.FIELDS, isCloze = false,
-        css = ".card{font-family:Arial,sans-serif;font-size:20px;text-align:left;line-height:1.5;padding:20px}.answer{font-weight:bold}.source{font-size:15px;opacity:.8;white-space:pre-wrap}",
-        cardTemplates = {{Name = "Pregunta", Front = "<div>{{Question}}</div>",
-            Back = "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div>{{#Explanation}}<p>{{Explanation}}</p>{{/Explanation}}<div class=source>{{#SourceExcerpt}}<blockquote>{{SourceExcerpt}}</blockquote>{{/SourceExcerpt}}{{BookTitle}} — {{Author}}<br>{{Chapter}} {{Location}}</div>"}}}
+        css = design.css,
+        cardTemplates = {design.template}}
 end
 return Learn
