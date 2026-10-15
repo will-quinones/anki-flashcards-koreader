@@ -1,7 +1,8 @@
 -- Full-screen Anki flashcard viewer with front/back experience.
 --
 -- Front: shows Phrase + IPA with a "Show Answer" button.
--- Back:  shows the image (when ready) + all fields + action buttons.
+-- Back:  shows the image (when ready) + all fields + editing buttons.
+-- Both sides expose Save and Send to Anki without revealing the answer.
 --
 -- Modelled on chatgptviewer.lua.
 
@@ -74,6 +75,7 @@ local CardViewer = InputContainer:extend {
     card           = nil,   -- card table: { phrase, ipa, definition, synonyms, text, source, image_path, … }
     show_back      = false, -- false = front (question), true = back (answer)
     on_show_answer = nil,   -- function() — called when user flips to back
+    on_show_question = nil, -- function() — called when user returns to front
     on_save        = nil,   -- function() -> true | nil, err
     on_send        = nil,   -- function() -> true | nil, err
     on_regenerate  = nil,   -- function()
@@ -89,6 +91,69 @@ local CardViewer = InputContainer:extend {
     text_margin    = Size.margin.small,
     button_padding = Size.padding.default,
 }
+
+function CardViewer:delivery_buttons()
+    local CardStorage = require("card_storage")
+    local already_saved = self.card and CardStorage.is_saved(self.card)
+    local function update_saved_button()
+        local button = self.button_table and self.button_table:getButtonById("save")
+        if button then
+            button:setText(_("✓ Guardada"), button.width)
+            button:disable()
+            button:refresh()
+        end
+    end
+    local buttons = {
+        {
+            id = "save",
+            text = already_saved and _("✓ Guardada") or _("Guardar"),
+            enabled = not already_saved and self.on_save ~= nil,
+            callback = function()
+                if not self.on_save then return end
+                local ok, err = self.on_save()
+                if ok then
+                    update_saved_button()
+                    UIManager:show(Notification:new {text = _("Guardada en el Kobo.")})
+                else
+                    UIManager:show(InfoMessage:new {text = err or _("No se pudo guardar."), timeout = 5})
+                end
+            end,
+        },
+        {
+            id = "send",
+            text = _("Enviar a Anki"),
+            enabled = self.on_send ~= nil,
+            callback = function()
+                if not self.on_send then return end
+                local ok, err = self.on_send()
+                if ok then
+                    -- Sending also persists the card locally. Reflect that on
+                    -- either side without closing or flipping the viewer.
+                    if self.card and CardStorage.is_saved(self.card) then update_saved_button() end
+                    UIManager:show(Notification:new {text = _("Enviada a Anki.")})
+                else
+                    UIManager:show(InfoMessage:new {text = _("Anki: ") .. (err or _("No se pudo enviar.")), timeout = 5})
+                end
+            end,
+        },
+    }
+    if self.on_add_highlight then
+        local highlighted = self.is_highlighted and self.is_highlighted()
+        buttons[#buttons+1] = {
+            id = "highlight", text = highlighted and _("✓ Subrayado") or _("Subrayar"),
+            enabled = not highlighted and (not self.can_add_highlight or self.can_add_highlight()),
+            callback = function()
+                local ok, err = self.on_add_highlight()
+                if ok then
+                    local button = self.button_table and self.button_table:getButtonById("highlight")
+                    if button then button:setText(_("✓ Subrayado"), button.width); button:disable(); button:refresh() end
+                    UIManager:show(Notification:new {text = err or _("Subrayado creado.")})
+                else UIManager:show(InfoMessage:new {text = err or _("No se pudo subrayar.")}) end
+            end,
+        }
+    end
+    return buttons
+end
 
 function CardViewer:init()
     self.align  = "center"
@@ -117,114 +182,57 @@ function CardViewer:init()
         width            = self.width,
         align            = "left",
         with_bottom_line = true,
-        title            = _("Anki Flashcard"),
+        title            = self.card and self.card.kind == "learn" and _("Anki Learn") or _("Anki Vocab"),
         close_callback   = function() self:onClose() end,
         show_parent      = self,
     }
 
     -- ── Button row ────────────────────────────────────────────────────────────
     local buttons_row = {}
-
-    if not self.show_back then
-        -- Front: Show Answer + Close
-        table.insert(buttons_row, {
-            text     = _("▼ Show Answer"),
-            callback = function()
-                if self.on_show_answer then self.on_show_answer() end
-            end,
-        })
-        if self.on_highlight_dialog then
-            table.insert(buttons_row, {
-                text     = _("Highlight"),
-                callback = function()
-                    self:onClose()
-                    self.on_highlight_dialog()
-                end,
-            })
-        end
-        table.insert(buttons_row, {
-            text     = _("Close"),
-            callback = function() self:onClose() end,
-        })
-    else
-        -- Back: full action buttons
+    local extras_row = {}
+    table.insert(buttons_row, {
+        id = "flip",
+        text = self.show_back and _("Mostrar pregunta") or _("Mostrar respuesta"),
+        callback = function()
+            local callback = self.on_show_answer
+            if self.show_back then callback = self.on_show_question end
+            if callback then callback() else self:update(nil, not self.show_back) end
+        end,
+    })
+    table.insert(buttons_row, {text = _("Cerrar"), callback = function() self:onClose() end})
+    if self.show_back then
         if not self.read_only then
-            table.insert(buttons_row, {
-                text     = _("✏️ Edit"),
+            table.insert(extras_row, {
+                text     = _("Editar"),
                 callback = function() self:showEditDialog() end,
             })
         end
 
-        local CardStorage   = require("card_storage")
-        local already_saved = self.card and CardStorage.is_saved(self.card.phrase or "")
-        table.insert(buttons_row, {
-            id      = "save",
-            text    = already_saved and _("✓ Saved") or _("★ Save"),
-            enabled = not already_saved,
-            callback = function()
-                if self.on_save then
-                    local ok, err = self.on_save()
-                    if ok then
-                        UIManager:show(Notification:new { text = _("Saved!") })
-                        local btn = self.button_table:getButtonById("save")
-                        if btn then btn:disable(); btn:refresh() end
-                    else
-                        UIManager:show(InfoMessage:new { text = err or _("Could not save"), timeout = 5 })
-                    end
-                end
-            end,
-        })
-
-        table.insert(buttons_row, {
-            text     = _("→ Anki"),
-            callback = function()
-                if self.on_send then
-                    local ok, err = self.on_send()
-                    if ok then
-                        UIManager:show(Notification:new { text = _("Sent to Anki!") })
-                    else
-                        UIManager:show(InfoMessage:new {
-                            text = _("Anki error: ") .. (err or "unknown"),
-                            timeout = 5,
-                        })
-                    end
-                end
-            end,
-        })
-
         if not self.read_only and self.on_regenerate then
-            table.insert(buttons_row, {
-                text     = _("↻"),
+            table.insert(extras_row, {
+                text     = _("Regenerar"),
                 callback = function() self.on_regenerate() end,
             })
         end
 
         if self.on_navigate_to_source then
-            table.insert(buttons_row, {
-                text     = _("Go to"),
+            table.insert(extras_row, {
+                text     = _("Origen"),
                 callback = function() self.on_navigate_to_source() end,
             })
         end
 
-        if self.on_highlight_dialog then
-            table.insert(buttons_row, {
-                text     = _("Highlight"),
-                callback = function()
-                    self:onClose()
-                    self.on_highlight_dialog()
-                end,
-            })
-        end
-
-        table.insert(buttons_row, {
-            text     = _("Close"),
-            callback = function() self:onClose() end,
-        })
     end
-
+    if self.on_highlight_dialog then
+        table.insert(extras_row, {text = _("Subrayado"), callback = function()
+            self:onClose(); self.on_highlight_dialog()
+        end})
+    end
+    local rows = {self:delivery_buttons(), buttons_row}
+    if #extras_row > 0 then rows[#rows+1] = extras_row end
     self.button_table = ButtonTable:new {
         width       = self.width - 2 * self.button_padding,
-        buttons     = { buttons_row },
+        buttons     = rows,
         zero_sep    = true,
         show_parent = self,
     }
@@ -316,7 +324,22 @@ function CardViewer:init()
 
     local big_gap = gap * 3  -- visible separator before cloze sentence
 
-    if not self.show_back then
+    if self.card and self.card.kind == "learn" then
+        local c = self.card
+        local face = Font:getFace("smallinfofont")
+        local text = c.question or ""
+        if self.show_back then
+            text = (c.question or "") .. "\n\n" .. ptf_bold(c.answer or "")
+            if c.explanation and c.explanation ~= "" then text = text .. "\n\n" .. c.explanation end
+            text = text .. "\n\n" .. ptf_bold("Fragmento del libro") .. "\n" .. (c.evidence or "")
+                .. "\n\n" .. (c.book_title or "") .. " — " .. (c.book_author or "")
+                .. "\n" .. (c.chapter or "") .. " " .. (c.location or "")
+            if c.context_quality == "selection" then text = text .. "\n\nContexto disponible: solo la selección." end
+        end
+        local text_widget = make_text(text, face, avail_h, nil, "left")
+        self.scroll_text_w = text_widget
+        content_widget = VerticalGroup:new {text_widget}
+    elseif not self.show_back then
         -- ── FRONT ─────────────────────────────────────────────────────────────
         -- Layout: Definition · Synonyms · Image · (big gap) · Cloze
         local c          = self.card or {}
@@ -424,9 +447,17 @@ end
 -- ── Edit flow (back only) ─────────────────────────────────────────────────────
 
 function CardViewer:showEditDialog()
+    if self.card and self.card.kind == "learn" and self.card.sent_to_anki then
+        UIManager:show(InfoMessage:new {text = "Esta tarjeta ya está en Anki. Edítala allí para conservar una única versión."})
+        return
+    end
     local sel_dlg
     local field_buttons = {}
-    for _i, f in ipairs(EDITABLE_FIELDS) do
+    local editable = self.card and self.card.kind == "learn" and {
+        {key = "question", label = "Pregunta"}, {key = "answer", label = "Respuesta"},
+        {key = "explanation", label = "Explicación"},
+    } or EDITABLE_FIELDS
+    for _i, f in ipairs(editable) do
         local fref = f
         table.insert(field_buttons, {{
             text     = _(fref.label),
@@ -481,12 +512,18 @@ function CardViewer:editField(field_def)
                 is_enter_default = true,
                 callback         = function()
                     local new_val = input_dlg:getInputText() or ""
+                    if self.card.kind == "learn" and field_def.key ~= "explanation" and not new_val:match("%S") then
+                        UIManager:show(InfoMessage:new {text = "La pregunta y la respuesta no pueden estar vacías."})
+                        return
+                    end
                     UIManager:close(input_dlg)
                     -- Defer widget-tree changes until after the current
                     -- event cycle completes (avoids crash mid-callback).
                     UIManager:scheduleIn(0, function()
                         local old_phrase = self.card.phrase
+                        local old_value = self.card[field_def.key]
                         self.card[field_def.key] = new_val
+                        if self.card.kind == "learn" then self.card.phrase = self.card.question end
                         -- When phrase changes: auto-update Cambridge source URL,
                         -- clear stale IPA, then trigger async IPA regeneration.
                         local phrase_changed = field_def.key == "phrase"
@@ -496,7 +533,14 @@ function CardViewer:editField(field_def)
                             self.card.source = "https://dictionary.cambridge.org/dictionary/english/" .. slug
                             self.card.ipa    = ""
                         end
-                        if self.on_update then self.on_update(self.card) end
+                        if self.on_update then
+                            local ok, err = self.on_update(self.card)
+                            if ok == false then
+                                self.card[field_def.key], self.card.phrase = old_value, old_phrase
+                                UIManager:show(InfoMessage:new {text = err or "No se pudieron guardar los cambios."})
+                                return
+                            end
+                        end
                         local new_v = self:update()
                         if phrase_changed and self.on_regen_ipa then
                             self.on_regen_ipa(new_val, self.card, new_v)
@@ -516,12 +560,15 @@ end
 -- Preserves show_back state unless new_show_back is explicitly passed.
 function CardViewer:update(new_card, new_show_back)
     local card      = new_card or self.card
-    local show_back = new_show_back ~= nil and new_show_back or self.show_back
+    local show_back = new_show_back
+    if show_back == nil then show_back = self.show_back end
     UIManager:close(self)
     local updated = CardViewer:new {
         card                  = card,
         show_back             = show_back,
         on_show_answer        = self.on_show_answer,
+        on_show_question      = self.on_show_question,
+        on_viewer_updated     = self.on_viewer_updated,
         on_save               = self.on_save,
         on_send               = self.on_send,
         on_regenerate         = self.on_regenerate,
@@ -531,9 +578,13 @@ function CardViewer:update(new_card, new_show_back)
         on_regen_text         = self.on_regen_text,
         on_regen_image        = self.on_regen_image,
         on_highlight_dialog   = self.on_highlight_dialog,
+        on_add_highlight      = self.on_add_highlight,
+        is_highlighted        = self.is_highlighted,
+        can_add_highlight     = self.can_add_highlight,
         read_only             = self.read_only,
     }
     UIManager:show(updated)
+    if self.on_viewer_updated then self.on_viewer_updated(updated) end
     return updated
 end
 

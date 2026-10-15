@@ -1,45 +1,147 @@
-# Anki Note Type
+# Tipos de nota de Anki
 
-This folder contains the **Vocabulary** note type definition used by the AnkiFlashcards plugin.
+Una **nota** contiene campos; su **tipo de nota** define esos campos y las
+plantillas que generan tarjetas. Una **baraja** determina dónde se repasan.
+Este complemento utiliza dos tipos internos automáticos, no perfiles ni
+ajustes configurables. Ambos se crean al primer envío si faltan y se validan
+sin sobrescribir tipos existentes. Las instrucciones manuales son opcionales.
 
-## Fields
+## KOReader Vocabulary — Anki Vocab
 
-| # | Field | Description |
-|---|-------|-------------|
-| 1 | `Phrase` | Canonical form of the phrase (base/infinitive, lowercase) |
-| 2 | `IPA` | Pronunciation notation (IPA, pinyin, romaji, etc.) |
-| 3 | `Definition` | Context-aware definition (up to 20 words) |
-| 4 | `Synonyms` | 3–4 synonyms, comma-separated |
-| 5 | `Text` | Cloze example sentence using `{{c1::...}}` |
-| 6 | `Source` | Dictionary URL for the phrase |
-| 7 | `ImageFront` | AI-generated illustration (shown on front) |
-| 8 | `ImageBack` | AI-generated illustration (shown on back) |
-| 9 | `Sound` | Audio pronunciation (`[sound:file.mp3]`) |
+**Tipo: Cloze**, con una plantilla que utiliza `{{cloze:Text}}`. No lo crees
+como Basic/normal: el filtro cloze necesita el tipo adecuado.
 
-## Installation via AnkiConnect
+| Orden | Campo | Contenido |
+|---|---|---|
+| 1 | `Phrase` | Palabra/expresión canónica; primer campo para duplicados. |
+| 2 | `IPA` | Pronunciación apropiada al idioma. |
+| 3 | `Definition` | Definición según el contexto. |
+| 4 | `Synonyms` | Sinónimos. |
+| 5 | `Text` | Frase con `{{c1::...}}`. |
+| 6 | `Source` | Referencia; puede ser una URL de diccionario. |
+| 7 | `ImageFront` | Referencia HTML a la imagen del anverso, opcional. |
+| 8 | `ImageBack` | Referencia HTML a la imagen del reverso, opcional. |
+| 9 | `Sound` | Referencia `[sound:archivo.mp3]`, opcional. |
 
-With [AnkiConnect](https://ankiweb.net/shared/info/2055492159) running, send `create-note-type.json` to create the note type automatically:
+El anverso muestra definición, sinónimos, imagen y hueco. El reverso revela
+la expresión y añade pronunciación, imagen, fuente y audio cuando existan.
+
+### Crear con AnkiConnect
+
+Desde la raíz del repositorio:
 
 ```bash
-curl -X POST http://localhost:8765 \
-  -H "Content-Type: application/json" \
-  -d @create-note-type.json
+curl http://127.0.0.1:8765 -H 'Content-Type: application/json' \
+  --data-binary @anki/create-note-type.json
 ```
 
-## Manual Installation
+El archivo es JSON válido y declara `isCloze: true`.
 
-1. Open Anki → **Tools → Manage Note Types → Add**
-2. Choose **Add: Basic** as the base type
-3. Name it `Vocabulary`
-4. Add the fields listed above (in order) via **Fields...**
-5. Edit the card template via **Cards...** and paste the HTML from `create-note-type.json`
+### Crear manualmente en Anki
 
-## Migrating from "English" Note Type
+1. **Herramientas → Gestionar tipos de nota → Añadir**.
+2. Elige **Cloze / Respuesta anidada**, no Basic.
+3. Nómbralo `KOReader Vocabulary`.
+4. En **Campos**, adapta los campos a la lista anterior, respetando nombres
+   y orden; elimina los campos de la plantilla base que no correspondan.
+5. En **Tarjetas**, copia `Front`, `Back` y `css` desde `create-note-type.json`.
 
-If you have an existing "English" note type from a previous version:
+Si tienes notas en un tipo distinto, como `English`, no se borran ni convierten.
+Esta versión envía Vocab a `KOReader Vocabulary`; no tiene un selector de tipos.
+No renombres ni conviertas tipos con notas sin comprobar antes su estructura.
 
-1. In Anki: **Tools → Manage Note Types → select "English" → Rename → "Vocabulary"**
-2. Add the `Sound` field: **Fields... → Add → "Sound"**
-3. All existing cards, reviews, scheduling, and media are preserved — only the type name changes
+### Actualizar el nombre anterior `Vocabulary`
 
-Alternatively, keep using "English" — set `model = "English"` in your `configuration.lua` or change it in the on-device settings under **Anki Connection → Note type**.
+Si ya tenías el tipo `Vocabulary` de esta copia, no crees uno nuevo:
+
+1. En Anki, **Gestionar tipos de nota → Vocabulary → Renombrar**.
+2. Cambia el nombre a **KOReader Vocabulary**. El ID del tipo, sus notas y
+   la programación de repasos se conservan; no cambies campos ni plantillas.
+3. Actualiza el complemento y reinicia KOReader. No hay que elegir el tipo:
+   el nombre correspondiente a cada acción es automático.
+4. Las claves antiguas `anki.model` / `anki_model` ya no seleccionan un tipo.
+   La configuración guardada las retira sin borrar API keys; los modelos de IA
+   se conservan por separado mediante una versión explícita de los ajustes.
+
+Si ya existe `KOReader Vocabulary` además del antiguo, no borres ni fusiones
+tipos automáticamente: revisa cuál contiene tus notas antes de migrar.
+
+## KOReader Learn — Anki Learn
+
+**Tipo: normal / Basic**, una tarjeta de pregunta/respuesta, sin cloze.
+El complemento lo crea al primer envío si falta. No necesita elegir otro
+perfil, idioma o proveedor por separado.
+
+| Orden | Campo | Contenido |
+|---|---|---|
+| 1 | `PluginID` | ID estable generado por el complemento. No lo edites; identifica la tarjeta y evita duplicados. |
+| 2 | `Question` | Pregunta autosuficiente. |
+| 3 | `Answer` | Respuesta breve. |
+| 4 | `Explanation` | Explicación opcional. |
+| 5 | `SelectedText` | Selección original del lector. |
+| 6 | `SourceExcerpt` | Cita de apoyo comprobada contra el texto recibido. |
+| 7 | `BookTitle` | Título del libro, si está disponible. |
+| 8 | `Author` | Autor, si está disponible. |
+| 9 | `Chapter` | Capítulo, si KOReader puede identificarlo. |
+| 10 | `Location` | Ubicación/página disponible. |
+| 11 | `Context` | Texto circundante realmente enviado a la IA; no el libro completo. |
+| 12 | `ContextQuality` | `document`, `pages` o `selection`, según la extracción disponible. |
+
+**Anverso:** `Question` solamente. **Reverso:** pregunta, respuesta,
+explicación y cita con título/autor/capítulo/ubicación. Los demás campos
+permiten conservar la procedencia y recuperar la tarjeta en otro lector.
+
+La plantilla no muestra `PluginID` ni `Context` completo durante el repaso.
+El primer campo sigue siendo `PluginID` aunque no aparezca visualmente.
+
+### Crear con AnkiConnect
+
+```bash
+curl http://127.0.0.1:8765 -H 'Content-Type: application/json' \
+  --data-binary @anki/create-learning-note-type.json
+```
+
+Esto es opcional: también se crea al primer envío de Learn. Si el nombre ya
+existe, no se recrea ni sobrescribe. El complemento comprueba los campos y
+requiere `PluginID` como primer campo; informa si el esquema es incompatible.
+
+### Crear manualmente en Anki
+
+1. **Herramientas → Gestionar tipos de nota → Añadir → Basic / Básico**.
+2. Nómbralo exactamente `KOReader Learn`.
+3. Adapta los campos a la lista de doce nombres en ese orden.
+4. Copia `Front`, `Back` y `css` desde `create-learning-note-type.json`.
+5. Conserva una sola plantilla, **Pregunta**. No actives cloze ni una tarjeta
+   inversa adicional: el complemento espera pregunta delante y respuesta detrás.
+
+En Lua, la definición canónica está en
+[`learning_card.lua`](../AnkiFlashcards.koplugin/learning_card.lua).
+Los ejemplos JSON se comprueban contra esa definición en las pruebas.
+
+## Usar y recuperar
+
+- En KOReader selecciona texto → **Anki Vocab** o **Anki Learn**.
+- Revisa la propuesta; **Guardar** y **Enviar a Anki** están en ambas caras.
+- Las notas nuevas llevan `KOReader` y `KOReader::Vocab` / `KOReader::Learn`.
+- **Recuperar desde Anki** lee `KOReader Vocabulary` y `KOReader Learn` con etiqueta `KOReader` y conserva
+  sus IDs. Revisa movimientos y cambios de notas vinculadas aunque salgan de
+  ese filtro; los cambios de contenido local solo se aplican con confirmación.
+  No borra tarjetas locales ni modifica notas de Anki.
+- Vocab antiguo puede no tener metadatos de libro. Learn conserva los campos
+  de procedencia, pero no reconstruye automáticamente subrayados del documento.
+- El complemento no cambia la programación de repasos de notas existentes.
+
+Las dos clases pueden compartir baraja. En **Barajas y envío → Organización**
+elige **Por libro y tipo** para usar `<Libro>::Vocabulario` y
+`<Libro>::Aprendizaje`. Eso no mueve tarjetas existentes.
+
+## Precauciones
+
+- Ejecuta los comandos en el ordenador con Anki abierto; `127.0.0.1` es local
+  a ese ordenador, no una dirección que pueda usar el Kobo.
+- Crear un tipo de nota no crea contenido ni tarjetas de prueba.
+- No borres un tipo que ya contiene notas para aplicar estas instrucciones.
+- Si utilizas autenticación de AnkiConnect, los ejemplos necesitarían la clave;
+  el cliente actual del plugin no implementa esa autenticación.
+- La cita validada demuestra que ese texto estaba disponible, no que toda la
+  interpretación de la IA sea correcta. Revisa las tarjetas Learn.

@@ -1,6 +1,6 @@
 # AnkiFlashcards KOReader — Backlog
 
-## Reference: Anki "Vocabulary" Note Type Fields
+## Reference: Anki "KOReader Vocabulary" Note Type Fields
 
 | Field       | Description                                      |
 |-------------|--------------------------------------------------|

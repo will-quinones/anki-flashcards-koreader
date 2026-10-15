@@ -1,0 +1,15 @@
+{
+  "action": "createModel",
+  "version": 6,
+  "params": {
+    "modelName": "KOReader Learn",
+    "isCloze": false,
+    "inOrderFields": ["PluginID", "Question", "Answer", "Explanation", "SelectedText", "SourceExcerpt", "BookTitle", "Author", "Chapter", "Location", "Context", "ContextQuality"],
+    "css": ".card{font-family:Arial,sans-serif;font-size:20px;text-align:left;line-height:1.5;padding:20px}.answer{font-weight:bold}.source{font-size:15px;opacity:.8;white-space:pre-wrap}",
+    "cardTemplates": [{
+      "Name": "Pregunta",
+      "Front": "<div>{{Question}}</div>",
+      "Back": "{{FrontSide}}<hr id=answer><div class=answer>{{Answer}}</div>{{#Explanation}}<p>{{Explanation}}</p>{{/Explanation}}<div class=source>{{#SourceExcerpt}}<blockquote>{{SourceExcerpt}}</blockquote>{{/SourceExcerpt}}{{BookTitle}} — {{Author}}<br>{{Chapter}} {{Location}}</div>"
+    }]
+  }
+}

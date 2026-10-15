@@ -7,7 +7,7 @@
 --   openai       — OpenAI (GPT Image, DALL-E). Requires API key.
 --   openrouter   — OpenRouter (Gemini, Flux, etc.). Requires API key.
 --
--- Provider is selected via config.image_provider (default: "dashscope").
+-- Provider is selected via config.image_provider. Missing/empty/"none" disables images.
 --
 -- Public API:
 --   ImageGenerator.generate_async(config, image_prompt, phrase, on_success, on_error)
@@ -18,10 +18,15 @@ local ltn12       = require("ltn12")
 local json        = require("json")
 local mime        = require("mime")
 local DataStorage = require("datastorage")
+local Feedback = require("generation_feedback")
 
 local IMAGE_DIR = DataStorage:getDataDir() .. "/.anki_images"
 
 local ImageGenerator = {}
+local pending = {}
+function ImageGenerator.is_pending(phrase)
+    return (pending[phrase or ""] or 0) > 0
+end
 
 -- ── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -391,7 +396,7 @@ local function gemini_generate(config, image_prompt, phrase, on_success, on_erro
             },
         })
 
-        local model = config.gemini_image_model or "gemini-2.5-flash-image"
+        local model = config.gemini_image_model or "gemini-3.1-flash-image"
         local response = {}
         https.TIMEOUT = 30
         local _, code = https.request {
@@ -914,17 +919,25 @@ local PROVIDERS = {
 --- Kick off async image generation. Returns immediately.
 --- on_success(image_path) called when the PNG is saved locally.
 --- on_error(err_string) called on any failure; if nil, a Notification is shown.
+function ImageGenerator.is_enabled(config)
+    local provider = config and config.image_provider
+    return type(provider) == "string" and provider ~= "" and provider ~= "none"
+end
+
 function ImageGenerator.generate_async(config, image_prompt, phrase, on_success, on_error)
+    -- No configured provider (or explicit 'none') means no images, not an
+    -- error. Check before constructing UI callbacks or validating the prompt.
+    if not ImageGenerator.is_enabled(config) then return end
     -- Default on_error: show a wrapping InfoMessage so long errors are readable on e-ink.
     if not on_error then
         local InfoMessage = require("ui/widget/infomessage")
         local UIManager   = require("ui/uimanager")
         on_error = function(msg)
-            UIManager:show(InfoMessage:new { text = msg, timeout = 5 })
+            UIManager:show(InfoMessage:new { text = "Imagen: " .. Feedback.image_message(msg) })
         end
     end
 
-    local provider_name = config and config.image_provider or "dashscope"
+    local provider_name = config.image_provider
 
     -- AnkiVocab provides a direct image URL, no prompt needed.
     if provider_name ~= "ankivocab" and (not image_prompt or image_prompt == "") then
@@ -937,7 +950,18 @@ function ImageGenerator.generate_async(config, image_prompt, phrase, on_success,
         return
     end
 
-    provider_fn(config, image_prompt, phrase, on_success, on_error)
+    local key, finished = phrase or "", false
+    pending[key] = (pending[key] or 0) + 1
+    local function complete(callback, value)
+        if finished then return end
+        finished = true
+        pending[key] = math.max(0, (pending[key] or 1) - 1)
+        if callback then callback(value) end
+    end
+    local success = function(path) complete(on_success, path) end
+    local failure = function(err) complete(on_error, err) end
+    local ok = pcall(provider_fn, config, image_prompt, phrase, success, failure)
+    if not ok then failure("request_failed") end
 end
 
 return ImageGenerator

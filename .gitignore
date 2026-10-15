@@ -1,1 +1,3 @@
 AnkiFlashcards.koplugin/configuration.lua
+__pycache__/
+.pytest_cache/

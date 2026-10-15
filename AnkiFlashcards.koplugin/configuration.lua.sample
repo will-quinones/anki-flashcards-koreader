@@ -1,69 +1,29 @@
+-- Optional bootstrap file. Prefer the native KOReader settings menu.
+-- Copy to configuration.lua only if you want file-based defaults.
+-- Never publish configuration.lua or your saved API keys.
 local CONFIGURATION = {
-    -- DashScope (Qwen) — card text and image generation (default).
-    -- Get your key at: https://dashscope-intl.console.aliyun.com/
-    dashscope_api_key = "YOUR_DASHSCOPE_API_KEY",
-    provider          = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
-    model             = "qwen-plus",        -- text model
-    image_model       = "qwen-image-plus",  -- image model
-
-    -- ── Gemini (Google) — alternative for text and image generation ──────
-    -- Get your key at: https://aistudio.google.com/apikey
-    -- Billing must be enabled for image generation.
-    gemini_api_key     = "YOUR_GEMINI_API_KEY",
-    gemini_text_model  = "gemini-2.5-flash",
-    gemini_image_model = "gemini-2.5-flash-image",
-
-    -- ── OpenAI — GPT-4o-mini for text, GPT Image / DALL-E for images ──────
-    -- Get your key at: https://platform.openai.com/api-keys
-    openai_api_key     = "YOUR_OPENAI_API_KEY",
-    openai_model       = "gpt-4o-mini",
-    openai_image_model = "gpt-image-1",
-
-    -- ── OpenRouter — access to hundreds of models via one API key ─────────
-    -- Get your key at: https://openrouter.ai/keys
-    -- Browse models at: https://openrouter.ai/models
-    openrouter_api_key = "YOUR_OPENROUTER_API_KEY",
-    openrouter_model       = "anthropic/claude-3-haiku",  -- cost-effective default
-    openrouter_image_model = "google/gemini-3.1-flash-image-preview",  -- image generation model
-
-    -- ── Target language ────────────────────────────────────────────────────
-    -- Language for flashcard generation (definitions, pronunciation, cloze).
-    -- Default: "English". Examples: "Spanish", "French", "German", "Japanese"
-    target_language = "English",
-
-    -- ── Text provider ─────────────────────────────────────────────────────
-    -- Which service to use for card text generation (definitions, IPA, etc.).
-    -- Options: "dashscope" (default), "gemini", "openai", "openrouter"
     text_provider = "dashscope",
+    dashscope_api_key = "YOUR_DASHSCOPE_API_KEY",
+    model = "qwen-plus", -- AI model, NOT an Anki note type.
+    target_language = "English", -- The book/card language; e.g. "Spanish".
 
-    -- ── Image provider ────────────────────────────────────────────────────
-    -- Which service to use for image generation.
-    -- Options: "dashscope" (default, requires dashscope_api_key),
-    --          "gemini" (requires gemini_api_key + billing),
-    --          "openai" (requires openai_api_key),
-    --          "openrouter" (requires openrouter_api_key),
-    --          "pollinations" (free, no API key, but unreliable)
-    image_provider = "dashscope",
+    -- Vocabulary extras are optional. Learn always uses text and source quotes.
+    image_provider = "none",
+    tts_enabled = false,
 
-    -- ── ElevenLabs TTS (optional — generates audio for Anki cards) ─────────
-    elevenlabs_api_key  = "YOUR_ELEVENLABS_API_KEY",
-    elevenlabs_voice_id = "JBFqnCBsd6RMkjVDRZzb",  -- Rachel (default)
-    tts_enabled         = false,
-
-    -- ── AnkiVocab Gateway (optional) ─────────────────────────────────────────
-    -- URL defaults to https://ankivocab.com — only override for dev/testing.
-    -- ankivocab_url = "http://localhost:8000",
-
-    -- ── Anki integration ────────────────────────────────────────────────────
-    -- Requires AnkiConnect add-on running on the same network as your Kobo.
-    -- Use the LAN IP of the device running Anki — not "localhost".
-    -- Note type: "Vocabulary" (see anki/README.md). Existing "English" types also work.
     anki = {
-        url   = "http://YOUR_HOST_IP:8765",  -- ← LAN IP of the device running Anki
-        deck  = "English::Koreader",
-        model = "Vocabulary",
-        tags  = { "KOReader" },
+        url = "http://YOUR_HOST_IP:8765", -- Computer running Anki, never localhost.
+        deck = "KOReader",              -- Destination when not organizing by book.
+        deck_mode = "book",             -- "book" or "configured".
+        -- book_parent = "KOReader",    -- Optional parent for book decks.
+        split_card_types = false,       -- Subdecks Vocabulario / Aprendizaje.
+        -- Names are requested in the UI when choosing an organization by type.
+        -- vocab_deck_name = "Vocabulario",
+        -- learn_deck_name = "Aprendizaje",
+        auto_send_wifi = false,
+        tags = {},                      -- Extra tags; KOReader tags are automatic.
     },
 }
-
+-- KOReader Vocabulary and KOReader Learn are managed automatically.
+-- Provider credentials/models, images, audio and cloud can be set in the UI.
 return CONFIGURATION

@@ -24,47 +24,43 @@ def test_ai_provider_settings_expose_provider_model_fields():
     ]:
         assert re.search(rf'key\s*=\s*"{key}"', settings)
 
-    assert "Text model" in settings
-    assert "Image model" in settings
+    assert "Modelo de IA" in settings
+    assert "Cuenta y modelo de IA" in settings
 
 
 def test_image_generators_use_configurable_model_names():
     image_generator = read("image_generator.lua")
 
     assert 'config.image_model or "qwen-image-plus"' in image_generator
-    assert 'config.gemini_image_model or "gemini-2.5-flash-image"' in image_generator
+    assert 'config.gemini_image_model or "gemini-3.1-flash-image"' in image_generator
     assert 'config.openai_image_model or "gpt-image-1"' in image_generator
     assert 'config.openrouter_image_model or "google/gemini-3.1-flash-image-preview"' in image_generator
 
 
-def test_configuration_sample_documents_model_keys():
+def test_configuration_sample_is_minimal_and_has_no_note_type_setting():
     sample = read("configuration.lua.sample")
 
-    for key in [
-        "model",
-        "image_model",
-        "gemini_text_model",
-        "gemini_image_model",
-        "openai_model",
-        "openai_image_model",
-        "openrouter_model",
-        "openrouter_image_model",
-    ]:
-        assert key in sample
+    assert 'model = "qwen-plus"' in sample
+    assert 'image_provider = "none"' in sample
+    assert 'anki_model =' not in sample
+    assert not re.search(r'model\s*=\s*"KOReader (Vocabulary|Learn)"', sample)
 
 
 def test_legacy_custom_anki_model_migrates_without_overriding_text_model():
     settings = read("settings_viewer.lua")
+    state = read("settings_state.lua")
     main = read("main.lua")
     manager = read("card_manager.lua")
 
-    assert 'if not saved.anki_model and saved.model and saved.model ~= "" then' in settings
-    assert 'if not saved_anki.anki_model and saved_anki.model and saved_anki.model ~= "" then' in main
+    assert 'State.persistable(State.merge(base, Storage.load_anki_settings()))' in settings
+    assert 'not saved.settings_version and not saved.anki_model' in state
+    assert 'not saved_anki.settings_version and not saved_anki.anki_model' in main
     assert "saved_anki.anki_model = saved_anki.model" in main
     assert "saved_anki.model = nil" in main
-    assert 'cfg.model = base_config and base_config.model or "qwen-plus"' in settings
-    assert 'elseif k == "model" and not fresh.anki_model then' in main
-    assert 'elseif k == "model" and not saved.anki_model then' in manager
+    assert 'cfg.model = base and base.model or "qwen-plus"' in state
+    assert 'SettingsState.merge(CONFIGURATION, CardStorage.load_anki_settings())' in main
+    assert 'SettingsState.merge(base, CardStorage.load_anki_settings())' in manager
+    assert 'clean.settings_version = 2' in state
 
     # Legacy `model` is an Anki note type, not a provider model. Do not
     # classify a user-defined note type with a hard-coded allowlist.

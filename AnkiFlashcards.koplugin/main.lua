@@ -1,7 +1,6 @@
 -- AnkiFlashcards KOReader plugin.
--- Adds two entries to the highlight dialog:
---   📖 Anki Card  — generates a full Anki flashcard via AI and shows a card viewer
---   📚 My Cards   — opens the card manager (list of saved cards)
+-- Tools menu for management and saved cards, plus card generation from
+-- highlight selections and single-word dictionary popups.
 
 local Device         = require("device")
 local InfoMessage    = require("ui/widget/infomessage")
@@ -22,6 +21,13 @@ local CardSync         = require("card_sync")
 local HighlightInbox   = require("highlight_inbox")
 local ImageGenerator   = require("image_generator")
 local AudioGenerator   = require("audio_generator")
+local SettingsViewer   = require("settings_viewer")
+local SettingsState    = require("settings_state")
+local Learning         = require("learning")
+local Feedback         = require("generation_feedback")
+local Recovery         = require("anki_recovery")
+local HighlightMenu    = require("highlight_menu")
+local Annotations      = require("annotation_tools")
 
 local MAX_HL    = 2000
 local MAX_TITLE = 100
@@ -32,14 +38,15 @@ local CONFIGURATION = nil
 do
     local ok, conf = pcall(require, "configuration")
     if ok then CONFIGURATION = conf end
+    CONFIGURATION = CONFIGURATION or {}
     local saved_anki = CardStorage.load_anki_settings()
     if saved_anki then
         CONFIGURATION = CONFIGURATION or {}
-        -- Before #42, `model` stored the Anki note type. Move every legacy
-        -- value (including custom note types) out of the provider-model key.
-        -- Presence of `anki_model` is the format discriminator; note-type
-        -- names are user-defined and cannot be recognized from an allowlist.
-        if not saved_anki.anki_model and saved_anki.model and saved_anki.model ~= "" then
+        -- Old files used `model` for a note type and later `anki_model` to
+        -- disambiguate it. New files use settings_version and automatic types.
+        -- Read legacy aliases only to avoid mistaking an old note name for
+        -- an AI model; never infer old note names from a hard-coded allowlist.
+        if not saved_anki.settings_version and not saved_anki.anki_model and saved_anki.model and saved_anki.model ~= "" then
             saved_anki.anki_model = saved_anki.model
             saved_anki.model = nil
         end
@@ -64,16 +71,23 @@ do
             "elevenlabs_api_key",
             "ankivocab_api_key",
         }) do
-            if saved_anki[key] and saved_anki[key] ~= "" then
+            if (key == "image_provider" or key:match("_api_key$")) and saved_anki[key] ~= nil then
+                -- An explicitly cleared image provider must override the file.
+                CONFIGURATION[key] = saved_anki[key]
+            elseif saved_anki[key] and saved_anki[key] ~= "" then
                 CONFIGURATION[key] = saved_anki[key]
             end
         end
     end
 end
 
+-- Apply the same normalization used by the settings UI to generation/send
+-- paths too; an empty displayed model must really use the provider default.
+SettingsState.apply(CONFIGURATION, SettingsState.merge(CONFIGURATION, CardStorage.load_anki_settings()))
+
 local AnkiFlashcards = InputContainer:new {
     name        = "ankiflashcards",
-    is_doc_only = true,
+    is_doc_only = false,
 }
 
 -- Strip control chars, normalise whitespace, and truncate.
@@ -122,27 +136,7 @@ end
 -- Build the effective Anki config by merging saved settings on top of
 -- the config table loaded at startup.
 local function get_anki_config()
-    local cfg  = {}
-    local base = CONFIGURATION and CONFIGURATION.anki
-    if base then
-        for k, v in pairs(base) do cfg[k] = v end
-    end
-    local fresh = CardStorage.load_anki_settings()
-    if fresh then
-        for k, v in pairs(fresh) do
-            if k == "anki_model" then
-                cfg.model = v
-            elseif k == "model" and not fresh.anki_model then
-                cfg.model = v
-            elseif k ~= "model" and k ~= "image_model"
-               and k ~= "gemini_text_model" and k ~= "gemini_image_model"
-               and k ~= "openai_model" and k ~= "openai_image_model"
-               and k ~= "openrouter_model" and k ~= "openrouter_image_model" then
-                cfg[k] = v
-            end
-        end
-    end
-    return cfg
+    return SettingsState.merge(CONFIGURATION, CardStorage.load_anki_settings())
 end
 
 -- Build an image-generator config for a card.  When the image provider is
@@ -169,6 +163,7 @@ end
 -- For ankivocab, only trigger if the card was actually created via AnkiVocab
 -- (_ankivocab_word is set), not just because the current provider is ankivocab.
 local function can_generate_image(card, img_cfg)
+    if not ImageGenerator.is_enabled(img_cfg) then return false end
     local has_prompt = card.image_prompt and card.image_prompt ~= ""
     local is_ankivocab_card = img_cfg.image_provider == "ankivocab"
                           and card._ankivocab_word and card._ankivocab_word ~= ""
@@ -294,11 +289,14 @@ local function show_quick_lookup_popup(phrase, lookup, on_delete)
 end
 
 function AnkiFlashcards:init()
+    self.ui.menu:registerToMainMenu(self)
+    -- Settings and saved cards are also accessible from the file browser.
+    if not self.ui.highlight then return end
 
     -- ── Entry 4: Anki Card (primary action, registered last = bottom) ───────────
-    self.ui.highlight:addToHighlightDialog("ankiflashcards_4", function(rhi)
+    local function card_button(rhi)
         return {
-            text    = _("Anki Card"),
+            text    = _("Anki Vocab"),
             enabled = Device:hasClipboard(),
             callback = function()
                 local ui = self.ui
@@ -316,6 +314,14 @@ function AnkiFlashcards:init()
 
                 -- Highlighted text, position, and surrounding context.
                 local sel = rhi.selected_text
+                local annotation_snapshot = Annotations.capture(ui, sel)
+                local existing_card = Annotations.find_card(annotation_snapshot, "vocab", CardStorage.load_cards())
+                if existing_card then
+                    Annotations.bind(existing_card, annotation_snapshot)
+                    ui.highlight:onClose()
+                    CardManager.open_card(CONFIGURATION, existing_card, ui)
+                    return
+                end
                 local highlighted = extract_text(sel or "")
                 local phrase      = capitalize_first(clean_str(highlighted, MAX_HL))
                 local highlight_pos0 = sel and sel.pos0
@@ -335,57 +341,10 @@ function AnkiFlashcards:init()
                     source = author
                 end
 
-                -- Save the selection as a document highlight before
-                -- closing (onClose clears the selection state).
-                -- Skip if a highlight already exists at the same position.
-                local already_highlighted = false
-                local anns = (ui.annotation and ui.annotation.annotations) or {}
-                for _, ann in ipairs(anns) do
-                    if ann.drawer and ann.pos0 == highlight_pos0 and ann.pos1 == highlight_pos1 then
-                        already_highlighted = true
-                        break
-                    end
-                end
-                if not already_highlighted then
-                    rhi:saveHighlight()
-                end
-
+                -- Highlighting is an explicit action in the generated preview.
                 ui.highlight:onClose()
 
-                -- Show a loading notification while the AI call runs.
-                local loading = Notification:new {
-                    text    = _("Generating flashcard for: ") .. phrase,
-                    timeout = 30,
-                }
-                UIManager:show(loading)
-
-                -- Schedule the AI call so the UI can render the notification first.
-                -- Retries up to 2 times on HTTP 429 (rate limit), waiting 5s between attempts.
-                local function do_generate(attempts_left)
-                    UIManager:close(loading)
-                    local card, err = CardGenerator.generate(
-                        CONFIGURATION, phrase, context, title, author
-                    )
-                    if not card then
-                        if err and err:find("429") and attempts_left > 0 then
-                            local rn = Notification:new {
-                                text    = _("Rate limited — retrying in 5 s…"),
-                                timeout = 6,
-                            }
-                            UIManager:show(rn)
-                            UIManager:scheduleIn(5, function()
-                                UIManager:close(rn)
-                                do_generate(attempts_left - 1)
-                            end)
-                            return
-                        end
-                        UIManager:show(InfoMessage:new {
-                            text    = _("Card generation failed: ") .. (err or "unknown"),
-                            timeout = 5,
-                        })
-                        return
-                    end
-
+                local function on_generated(card)
                     -- AnkiVocab returns its own source URL; other providers use Cambridge.
                     if not card.source or card.source == "" then
                         card.source = cambridge_url(card.phrase)
@@ -394,6 +353,7 @@ function AnkiFlashcards:init()
                     card.book_author    = author
                     card.highlight_pos0 = highlight_pos0
                     card.highlight_pos1 = highlight_pos1
+                    Annotations.bind(card, annotation_snapshot)
 
                     -- Keep _audio_url so AnkiConnect can download and attach
                     -- the server-generated audio when sending to Anki.
@@ -405,9 +365,13 @@ function AnkiFlashcards:init()
                     -- show_back=false → front (question) side.
                     local function make_viewer(c, show_back_flag)
                         local v
+                        local annotation_actions = Annotations.viewer_actions(ui, c)
                         v = CardViewer:new {
                             card      = c,
                             show_back = show_back_flag or false,
+                            on_add_highlight = annotation_actions.on_add_highlight,
+                            is_highlighted = annotation_actions.is_highlighted,
+                            can_add_highlight = annotation_actions.can_add_highlight,
 
                             on_show_answer = function()
                                 -- Close whichever viewer is currently showing
@@ -417,6 +381,11 @@ function AnkiFlashcards:init()
                                 local nv = make_viewer(c, true)
                                 viewer_ref[1] = nv
                             end,
+                            on_show_question = function()
+                                UIManager:close(viewer_ref[1] or v)
+                                viewer_ref[1] = make_viewer(c, false)
+                            end,
+                            on_viewer_updated = function(updated) viewer_ref[1] = updated end,
 
                             on_save = function()
                                 local ok2, save_err = CardStorage.save_card(c)
@@ -432,80 +401,45 @@ function AnkiFlashcards:init()
 
                             on_send = function()
                                 local ok, err = AnkiSync.send_card(get_anki_config(), c, CONFIGURATION)
-                                if ok then CardStorage.save_card(c) end
                                 return ok, err
                             end,
 
                             on_regenerate = function()
-                                if viewer_ref[1] then
-                                    UIManager:close(viewer_ref[1])
-                                end
-                                local loading2 = Notification:new {
-                                    text    = _("Regenerating…"),
-                                    timeout = 30,
-                                }
-                                UIManager:show(loading2)
-                                UIManager:scheduleIn(0.05, function()
-                                    UIManager:close(loading2)
-                                    local new_card, new_err = CardGenerator.generate(
-                                        CONFIGURATION, phrase, context, title, author
-                                    )
-                                    if not new_card then
-                                        UIManager:show(InfoMessage:new {
-                                            text    = _("Regenerate failed: ") .. (new_err or "unknown"),
-                                            timeout = 5,
-                                        })
-                                        return
-                                    end
-                                    new_card.source         = cambridge_url(new_card.phrase)
-                                    new_card.book_title     = title
-                                    new_card.book_author    = author
-                                    new_card.highlight_pos0 = highlight_pos0
-                                    new_card.highlight_pos1 = highlight_pos1
-                                    -- Regenerated card starts on front again.
-                                    local nv = make_viewer(new_card, false)
-                                    viewer_ref[1] = nv
-                                    -- Kick off new image generation.
-                                    if new_card.image_prompt then
-                                        ImageGenerator.generate_async(
-                                            CONFIGURATION,
-                                            new_card.image_prompt,
-                                            new_card.phrase,
-                                            function(img_path)
-                                                new_card.image_path = img_path
-                                                CardStorage.update_image_path(new_card.phrase, img_path)
-                                                if viewer_ref[1] then
-                                                    local nv2 = viewer_ref[1]:update(new_card)
-                                                    viewer_ref[1] = nv2
-                                                end
-                                            end,
-                                            nil  -- image errors are non-fatal
-                                        )
-                                    end
+                                NetworkMgr:runWhenOnline(function()
+                                    Feedback.run(function()
+                                        return CardGenerator.generate(CONFIGURATION, phrase, context, title, author)
+                                    end, function(new_card)
+                                        new_card.source         = cambridge_url(new_card.phrase)
+                                        new_card.book_title     = title
+                                        new_card.book_author    = author
+                                        new_card.highlight_pos0 = highlight_pos0
+                                        new_card.highlight_pos1 = highlight_pos1
+                                        Annotations.bind(new_card, annotation_snapshot)
+                                        -- Regenerated card starts on front again.
+                                        if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
+                                        viewer_ref[1] = make_viewer(new_card, false)
+                                        if new_card.image_prompt then
+                                            ImageGenerator.generate_async(
+                                                CONFIGURATION, new_card.image_prompt, new_card.phrase,
+                                                function(img_path)
+                                                    new_card.image_path = img_path
+                                                    CardStorage.update_image_path(new_card.phrase, img_path)
+                                                    if Feedback.is_top(viewer_ref[1]) then viewer_ref[1] = viewer_ref[1]:update(new_card) end
+                                                end,
+                                                nil  -- image errors are non-fatal
+                                            )
+                                        end
+                                    end, nil, {label = Feedback.REGENERATING})
                                 end)
                             end,
 
                             on_regen_text = function()
-                                if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
-                                local loading3 = Notification:new {
-                                    text    = _("Regenerating sentence…"),
-                                    timeout = 30,
-                                }
-                                UIManager:show(loading3)
                                 NetworkMgr:runWhenOnline(function()
-                                    UIManager:scheduleIn(0.05, function()
-                                        UIManager:close(loading3)
-                                        local new_text, new_prompt = CardGenerator.generate_text(CONFIGURATION, c.phrase)
-                                        if not new_text then
-                                            UIManager:show(InfoMessage:new {
-                                                text    = _("Regen failed: ") .. (new_prompt or "unknown"),
-                                                timeout = 5,
-                                            })
-                                            viewer_ref[1] = make_viewer(c, true)
-                                            return
-                                        end
+                                    Feedback.run(function() return CardGenerator.generate_text(CONFIGURATION, c.phrase) end,
+                                    function(new_text, new_prompt)
                                         c.text         = new_text
                                         c.image_prompt = new_prompt
+                                        if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
                                         viewer_ref[1] = make_viewer(c, true)
                                         -- Kick off image generation with new prompt.
                                         if new_prompt then
@@ -516,18 +450,18 @@ function AnkiFlashcards:init()
                                                 function(img_path)
                                                     c.image_path = img_path
                                                     CardStorage.update_image_path(c.phrase, img_path)
-                                                    if viewer_ref[1] then
+                                                    if Feedback.is_top(viewer_ref[1]) then
                                                         viewer_ref[1] = viewer_ref[1]:update(c)
                                                     end
                                                 end,
                                                 nil
                                             )
                                         end
-                                    end)
+                                    end, nil, {label = Feedback.REGENERATING})
                                 end)
                             end,
 
-                            on_regen_image = function()
+                            on_regen_image = ImageGenerator.is_enabled(CONFIGURATION) and function()
                                 if not c.image_prompt or c.image_prompt == "" then
                                     UIManager:show(Notification:new {
                                         text    = _("No image prompt available"),
@@ -537,7 +471,7 @@ function AnkiFlashcards:init()
                                 end
                                 local old_image = c.image_path
                                 UIManager:show(Notification:new {
-                                    text    = _("Regenerating image…"),
+                                    text    = _("Generando imagen…"),
                                     timeout = 60,
                                 })
                                 ImageGenerator.generate_async(
@@ -551,7 +485,7 @@ function AnkiFlashcards:init()
                                         end
                                         c.image_path = img_path
                                         CardStorage.update_image_path(c.phrase, img_path)
-                                        if viewer_ref[1] then
+                                        if Feedback.is_top(viewer_ref[1]) then
                                             viewer_ref[1] = viewer_ref[1]:update(c)
                                         end
                                         UIManager:setDirty(nil, "full")
@@ -562,7 +496,7 @@ function AnkiFlashcards:init()
                                     end,
                                     function(err)
                                         UIManager:show(InfoMessage:new {
-                                            text    = _("Image regen failed: ") .. (err or "unknown"),
+                                            text    = _("Imagen: ") .. Feedback.image_message(err),
                                             timeout = 5,
                                         })
                                     end
@@ -589,7 +523,7 @@ function AnkiFlashcards:init()
                                 card.image_path = img_path
                                 CardStorage.update_image_path(card.phrase, img_path)
                                 -- Refresh whichever side is showing.
-                                if viewer_ref[1] then
+                                if Feedback.is_top(viewer_ref[1]) then
                                     local nv = viewer_ref[1]:update(card)
                                     viewer_ref[1] = nv
                                 end
@@ -615,11 +549,52 @@ function AnkiFlashcards:init()
                 end
 
                 NetworkMgr:runWhenOnline(function()
-                    UIManager:scheduleIn(0.05, function() do_generate(2) end)
+                    Feedback.run(function()
+                        return CardGenerator.generate(CONFIGURATION, phrase, context, title, author)
+                    end, on_generated)
                 end)
             end,
         }
+    end
+    self.ui.highlight:addToHighlightDialog("ankiflashcards_4", card_button)
+    self.ui.highlight:addToHighlightDialog("ankiflashcards_5", function(rhi)
+        return {text = _("Anki Learn"), callback = function()
+            Learning.start(CONFIGURATION, self.ui, rhi.selected_text)
+        end}
     end)
+    -- Dictionary popups are used for single-word selections. Use KOReader's
+    -- extension API rather than replacing the dictionary or its lookup action.
+    if self.ui.dictionary and self.ui.dictionary.addToDictButtons then
+        self.ui.dictionary:addToDictButtons({
+            id = "ankiflashcards_card",
+            text = _("Anki Vocab"),
+            conditional = true,
+            row_group = "anki_actions",
+            show_func = function(popup)
+                return not popup.is_wiki and popup.highlight ~= nil
+                    and self.ui.highlight.selected_text ~= nil
+            end,
+            callback = function(popup)
+                -- Preserve the book selection until the existing card action
+                -- captures its text, positions and context.
+                popup:onClose(true)
+                card_button(self.ui.highlight).callback()
+            end,
+        })
+        self.ui.dictionary:addToDictButtons({
+            id = "ankiflashcards_learn", text = _("Anki Learn"),
+            conditional = true, row_group = "anki_actions",
+            show_func = function(popup)
+                return not popup.is_wiki and popup.highlight ~= nil
+                    and self.ui.highlight.selected_text ~= nil
+            end,
+            callback = function(popup)
+                local selection = self.ui.highlight.selected_text
+                popup:onClose(true)
+                Learning.start(CONFIGURATION, self.ui, selection)
+            end,
+        })
+    end
 
     -- ── Entry 2: Anki Manage (includes Anki Inbox) ───────────────────────────
     self.ui.highlight:addToHighlightDialog("ankiflashcards_2", function(_rhi)
@@ -656,6 +631,7 @@ function AnkiFlashcards:init()
     -- Short tap on a highlight with a saved card → show card viewer directly.
     -- No saved card → fall through to original highlight menu.
     local highlight_module = self.ui.highlight
+    HighlightMenu.install(highlight_module)
     local orig_onTap = highlight_module.onTap
     local plugin_self = self
 
@@ -681,17 +657,38 @@ function AnkiFlashcards:init()
                and pos.x <= r.x + r.w and pos.y <= r.y + r.h then
                 local ann = hl_self.ui.annotation.annotations[box.index]
                 if ann then
-                    local card = CardStorage.find_by_position(ann.pos0, ann.pos1)
-                                 or (ann.text and CardStorage.find_by_phrase_fuzzy(ann.text))
+                    local snapshot = Annotations.capture(self.ui, ann)
+                    local cards = CardStorage.load_cards()
+                    local vocab = Annotations.find_card(snapshot, "vocab", cards, true)
+                    local learn = Annotations.find_card(snapshot, "learn", cards, true)
+                    if vocab and learn then
+                        hl_self.selected_text = require("util").tableDeepCopy(ann)
+                        hl_self:onShowHighlightMenu(box.index)
+                        return true
+                    end
+                    local card = vocab or learn
                     if card then
+                        Annotations.bind(card, Annotations.capture(self.ui, ann))
+                        if card.kind == "learn" then
+                            Learning.show(CONFIGURATION, card, self.ui)
+                            return true
+                        end
                         local hl_index = box.index
                         local viewer_ref = {}
                         local function make_viewer(show_back)
                             local v
+                            if not card.image_path or card.image_path == "" then
+                                local latest = CardStorage.find_by_phrase(card.phrase)
+                                if latest and latest.image_path and latest.image_path ~= "" then card.image_path = latest.image_path end
+                            end
+                            local annotation_actions = Annotations.viewer_actions(self.ui, card)
                             v = CardViewer:new {
                                 card      = card,
                                 show_back = show_back,
                                 read_only = false,
+                                on_add_highlight = annotation_actions.on_add_highlight,
+                                is_highlighted = annotation_actions.is_highlighted,
+                                can_add_highlight = annotation_actions.can_add_highlight,
                                 on_show_answer = function()
                                     -- Close whichever viewer is currently showing
                                     -- (may differ from v after an async image update).
@@ -699,13 +696,18 @@ function AnkiFlashcards:init()
                                     UIManager:close(cur)
                                     viewer_ref[1] = make_viewer(true)
                                 end,
+                                on_show_question = function()
+                                    UIManager:close(viewer_ref[1] or v)
+                                    viewer_ref[1] = make_viewer(false)
+                                end,
+                                on_viewer_updated = function(updated) viewer_ref[1] = updated end,
                                 on_save = function()
                                     return nil, _("Already saved")
                                 end,
                                 on_send = function()
                                     return AnkiSync.send_card(get_anki_config(), card, CONFIGURATION)
                                 end,
-                                on_regen_image = function()
+                                on_regen_image = ImageGenerator.is_enabled(CONFIGURATION) and function()
                                     if not card.image_prompt or card.image_prompt == "" then
                                         UIManager:show(Notification:new {
                                             text    = _("No image prompt available"),
@@ -715,7 +717,7 @@ function AnkiFlashcards:init()
                                     end
                                     local old_image = card.image_path
                                     UIManager:show(Notification:new {
-                                        text    = _("Regenerating image…"),
+                                        text    = _("Generando imagen…"),
                                         timeout = 60,
                                     })
                                     ImageGenerator.generate_async(
@@ -728,7 +730,7 @@ function AnkiFlashcards:init()
                                             end
                                             card.image_path = img_path
                                             CardStorage.update_image_path(card.phrase, img_path)
-                                            if viewer_ref[1] then
+                                            if Feedback.is_top(viewer_ref[1]) then
                                                 viewer_ref[1] = viewer_ref[1]:update(card)
                                             end
                                             UIManager:show(Notification:new {
@@ -738,7 +740,7 @@ function AnkiFlashcards:init()
                                         end,
                                         function(err)
                                             UIManager:show(Notification:new {
-                                                text    = _("Image regen failed: ") .. (err or "unknown"),
+                                                text    = _("Imagen: ") .. Feedback.image_message(err),
                                                 timeout = 5,
                                             })
                                         end
@@ -756,6 +758,7 @@ function AnkiFlashcards:init()
                         local saved_img_cfg = make_image_config(card)
                         if (not card.image_path or card.image_path == "")
                            and can_generate_image(card, saved_img_cfg)
+                           and not (ImageGenerator.is_pending and ImageGenerator.is_pending(card.phrase))
                            and NetworkMgr:isOnline() then
                             ImageGenerator.generate_async(
                                 saved_img_cfg,
@@ -764,7 +767,7 @@ function AnkiFlashcards:init()
                                 function(img_path)
                                     card.image_path = img_path
                                     CardStorage.update_image_path(card.phrase, img_path)
-                                    if viewer_ref[1] then
+                                    if Feedback.is_top(viewer_ref[1]) then
                                         viewer_ref[1] = viewer_ref[1]:update(card)
                                     end
                                 end,
@@ -807,7 +810,7 @@ function AnkiFlashcards:init()
                             break
                         end
                         local loading = Notification:new {
-                            text    = _("Looking up: ") .. phrase_text,
+                            text    = _("Consultando…"),
                             timeout = 15,
                         }
                         UIManager:show(loading)
@@ -827,7 +830,7 @@ function AnkiFlashcards:init()
                                 show_quick_lookup_popup(phrase_text, result, delete_highlight)
                             else
                                 UIManager:show(InfoMessage:new {
-                                    text    = _("Lookup failed: ") .. (err or "unknown"),
+                                    text    = Feedback.classify(err).message,
                                     timeout = 3,
                                 })
                             end
@@ -855,10 +858,9 @@ function AnkiFlashcards:init()
         local cards = CardStorage.load_cards()
         local sent = 0
         for _, card in ipairs(cards) do
-            if not card.sent_to_anki then
+            if not card.sent_to_anki and not Recovery.needs_review(card) then
                 local ok = AnkiSync.send_card(cfg, card, CONFIGURATION)
                 if ok then
-                    CardStorage.mark_sent(card.phrase)
                     sent = sent + 1
                 end
             end
@@ -877,11 +879,49 @@ function AnkiFlashcards:init()
     -- One-shot silent cloud sync 45s after startup.
     UIManager:scheduleIn(45, function()
         local cfg = get_anki_config()
-        if cfg.sync_server and NetworkMgr:isOnline() then
+        if cfg.cloud_auto_sync and cfg.sync_server and NetworkMgr:isOnline() then
             CardSync.run_sync(cfg.sync_server, true, self.ui)
         end
     end)
 
+end
+
+function AnkiFlashcards:addToMainMenu(menu_items)
+    menu_items.ankiflashcards = {
+        text = _("Anki Flashcards"),
+        sorting_hint = "tools",
+        sub_item_table = {
+            {
+                text = _("Configuración"),
+                sub_item_table_func = function()
+                    return SettingsViewer.menu_items(CONFIGURATION, function(cfg)
+                        SettingsState.apply(CONFIGURATION, cfg)
+                    end, self.ui)
+                end,
+            },
+            {
+                text = _("Tarjetas"),
+                sub_item_table_func = function()
+                    local items = CardManager.menu_items(CONFIGURATION, { ui = self.ui,
+                        on_inbox = self.ui.document and function()
+                            HighlightInbox.show(self.ui, CONFIGURATION)
+                        end or nil,
+                    })
+                    table.insert(items, 1, {
+                        text = _("Mis tarjetas"),
+                        callback = function()
+                            CardManager.show(CONFIGURATION, nil, self.ui)
+                        end,
+                    })
+                    return items
+                end,
+            },
+            {
+                text = _("Estadísticas por libro"),
+                callback = CardManager.show_stats,
+            },
+        },
+    }
 end
 
 return AnkiFlashcards
