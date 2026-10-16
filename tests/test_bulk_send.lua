@@ -27,15 +27,13 @@ package.loaded.anki_import = {}
 package.loaded.learning = {}
 package.loaded.card_sync = {}
 local Manager = dofile("AnkiFlashcards.koplugin/card_manager.lua")
-Manager.show_manage({anki = {url = "http://fake:8765"}})
-local original_menu = menu
 local actions = Manager.menu_items({anki = {url = "http://fake:8765"}})
-assert(menu == original_menu) -- native actions do not open another widget
+assert(menu == nil and Manager.show_manage == nil) -- No legacy Manage widget/API.
 for _, item in ipairs(actions) do
     assert(not item.text:find("Settings", 1, true))
     assert(not item.text:find("Stats", 1, true))
 end
-for _, item in ipairs(menu.item_table) do
+for _, item in ipairs(actions) do
     if item.text == "Enviar todas las pendientes a Anki" then item.callback() end
 end
 assert(#messages == 1)

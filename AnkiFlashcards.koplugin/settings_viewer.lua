@@ -244,9 +244,15 @@ function Settings.menu_items(base, on_saved, ui)
         }
     end
     local function text_page()
+        local auto_highlight = action(_("Subrayar al guardar tarjeta"), function()
+            save({highlight_on_save = not cfg.highlight_on_save})
+        end)
+        auto_highlight.checked_func = function() return cfg.highlight_on_save == true end
+        auto_highlight.help_text = _("Subraya la selección original solo si contiene más de una palabra y después de pulsar Guardar y guardar correctamente Anki Vocab o Anki Learn. Una sola palabra o generar la vista previa no subraya. No duplica subrayados existentes ni cambia la selección de texto de KOReader.")
         return {
             submenu(function() return _("Servicio: ") .. chosen("text").name end, function() return provider_choices("text") end),
             submenu(_("Cuenta y modelo de IA"), function() return account("text") end),
+            auto_highlight,
             submenu(function()
                 local label = cfg.target_language or "English"
                 for _i, lang in ipairs(LANGUAGES) do if lang.id == label then label = lang.name; break end end

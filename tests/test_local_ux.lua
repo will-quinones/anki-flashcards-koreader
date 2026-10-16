@@ -50,6 +50,8 @@ stub("settings_state", dofile(plugin_dir .. "settings_state.lua"))
 local learning_started = 0
 stub("learning", {start = function() learning_started = learning_started + 1 end})
 stub("highlight_menu", {install = function() return false end})
+stub("auto_send", {new = function() return {start = function() end, stop = function() end,
+    settings_changed = function() end} end})
 local plugin = dofile(plugin_dir .. "main.lua")
 local registered = 0
 local menu = { registerToMainMenu = function() registered = registered + 1 end }
@@ -87,12 +89,18 @@ local dict_button = dict_buttons.ankiflashcards_card
 assert(buttons.ankiflashcards_4 and dict_button)
 assert(buttons.ankiflashcards_4(highlight).text == "Anki Vocab")
 assert(buttons.ankiflashcards_5(highlight).text == "Anki Learn")
+assert(buttons.ankiflashcards_2 == nil and buttons.ankiflashcards_3 == nil)
+for _, factory in pairs(buttons) do
+    local button = factory(highlight)
+    assert(button.text ~= "Anki Manage" and button.text ~= "My Cards")
+end
 assert(dict_buttons.ankiflashcards_learn.text == "Anki Learn")
 local popup = {highlight = highlight, onClose = function(_, preserve)
     assert(preserve)
     popup_closed = true
 end}
-assert(dict_button.conditional and dict_button.show_func(popup))
+assert(not dict_button.conditional and dict_button.menu_text == "Anki Vocab" and dict_button.show_func(popup))
+assert(not dict_buttons.ankiflashcards_learn.conditional and dict_buttons.ankiflashcards_learn.menu_text == "Anki Learn")
 assert(not dict_button.show_func({is_wiki = true, highlight = highlight}))
 dict_button.callback(popup)
 assert(status_messages[#status_messages] == "Generando tarjeta…")
@@ -129,3 +137,66 @@ print("PASS: saved Vocab/Learn highlights keep their full native action menu, wi
 local legacy = instance({menu = menu, highlight = highlight, dictionary = {}})
 legacy:init()
 print("PASS: missing dictionary extension API does not prevent plugin initialization")
+
+local A=require("annotation_tools")
+reader:init() -- Rebind buttons after the compatibility-only legacy instance.
+local original_generated=A.highlight_saved
+local preferences={}
+A.highlight_saved=function(cfg, ui, card)
+    assert(ui==reader.ui and card.annotation_source and card.phrase=="palabra")
+    preferences[#preferences+1]=cfg.highlight_on_save
+    return true
+end
+package.loaded.card_generator.generate=function() return {phrase="palabra"} end
+local preview
+package.loaded.card_viewer.new=function(_,spec) preview=spec; return spec end
+package.loaded.generation_feedback.run=function(generate,success)
+    local card=generate();if card then success(card) end
+end
+for _,enabled in ipairs({false,true}) do
+    package.loaded.configuration.highlight_on_save=enabled
+    highlight.selected_text=selection
+    buttons.ankiflashcards_4(highlight).callback()
+    assert(#preferences==(enabled and 1 or 0)) -- Preview never highlights.
+    package.loaded.card_storage.save_card=function() return nil,"failed" end
+    assert(not preview.on_save())
+    assert(#preferences==(enabled and 1 or 0))
+    package.loaded.card_storage.save_card=function() return true end
+    assert(preview.on_save())
+    assert(preferences[#preferences]==enabled and highlight_saved==0)
+end
+package.loaded.card_generator.generate=function() return nil end
+highlight.selected_text=selection
+buttons.ankiflashcards_4(highlight).callback()
+assert(#preferences==2 and highlight_saved==0)
+A.highlight_saved=function() return nil,"Highlight failed" end
+assert(preview.on_save()) -- Highlight failure must not undo a successful save.
+A.highlight_saved=original_generated
+print("PASS: Vocab highlights only after explicit successful save, never on preview or failed save; highlight errors preserve saved cards")
+
+-- Optional compatibility probe against the installed native customization code.
+if arg and arg[1] then
+    local file = assert(io.open(arg[1], "r"))
+    local source = file:read("*all"); file:close()
+    local body = assert(source:match("function ReaderDictionary:_genCustomizeButtonsMenu%(%)%s*(.-)%s*%-%- This function return the config from settings%."))
+    local build = assert(loadstring("return function(self) " .. body .. "\nreturn available_options end"))
+    setfenv(build, setmetatable({
+        _ = function(value) return value end,
+        Device = {hasDPad = function() return false end},
+        ffiUtil = {orderedPairs = function(values) return pairs(values) end},
+        DictQuickLookup = {layoutContainsButtonId = function(layout, id)
+            for _, row in ipairs(layout) do for _, existing in ipairs(row) do
+                if existing == id then return true end
+            end end
+            return false
+        end},
+    }, {__index = _G}))
+    local native = {_dict_buttons = dict_buttons, default_layout = {{"close"}}}
+    local found = {}
+    for _, option in ipairs(build()(native)) do found[option.id] = option.text end
+    assert(found.ankiflashcards_card == "Anki Vocab" and found.ankiflashcards_learn == "Anki Learn")
+    assert(#native.default_layout == 3)
+    build()(native)
+    assert(#native.default_layout == 3) -- Reopening doesn't duplicate entries.
+    print("PASS: installed native dictionary customization lists both Anki actions and inserts each only once")
+end

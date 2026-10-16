@@ -29,6 +29,11 @@ function Learning.show(base, card, ui)
             can_add_highlight = annotation_actions.can_add_highlight,
             on_save = function()
                 local ok, err = Storage.save_learning_card(card)
+                if ok then
+                    local cfg = State.merge(base, Storage.load_anki_settings())
+                    local highlighted, highlight_err = Annotations.highlight_saved(cfg, ui, card)
+                    if not highlighted then message(highlight_err or "La tarjeta se guardó, pero no se pudo subrayar.") end
+                end
                 return ok, err == "already_saved" and "La tarjeta ya está guardada." or err
             end,
             on_send = function()

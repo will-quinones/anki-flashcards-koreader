@@ -1,5 +1,109 @@
 # Cambios locales
 
+## Botones Anki configurables en el diccionario
+
+Anki Vocab y Anki Learn se registran como botones persistentes con menu_text,
+no como filas transitorias conditional. Aparecen en Ordenar y alternar botones
+y conservan sus IDs y show_func para selecciones válidas fuera de Wikipedia.
+No se reescribe dict_button_config ni se impone un orden o activación nuevos.
+
+## Solo varias palabras y retirada del menú antiguo
+
+El subrayado opcional tras Guardar requiere más de una palabra en la selección
+original capturada, no en el contexto o pregunta generada. Reconoce espacios
+Unicode e ignora signos de puntuación sueltos. No limita el subrayado manual.
+Retirados los registros Anki Manage y My Cards del menú de selección y eliminado
+el constructor/show_manage del panel antiguo. menu_items devuelve directamente
+las acciones al menú nativo actual. Se conservan gestión, recuperación, tarjetas,
+anotaciones, configuración y envíos desde Herramientas → Anki Flashcards.
+Instalados y verificados los cuatro módulos afectados en el Kobo; suites Lua y
+Python completas y cinco pruebas simuladas en LuaJIT del dispositivo correctas.
+Configuración privada, tarjetas y medios conservaron sus hashes; sin respaldos.
+
+## Subrayado opcional al guardar tarjetas
+
+Ajuste `highlight_on_save` en Configuración → Generación de tarjetas →
+Subrayar al guardar tarjeta. Valor predeterminado falso, preservando la copia
+instalada que dejaba el subrayado a la acción explícita de la vista previa.
+Se consulta solo después de guardar correctamente con el botón Guardar Vocab o Learn y se
+usa annotation_tools.highlight con el snapshot original, deduplicación EPUB/PDF
+y comprobación de libro/posiciones/cierre del lector. Un error de subrayado no
+impide conservar la tarjeta guardada. No hay anotaciones nuevas por generar la
+vista previa, abrir, regenerar, enviar, recuperar o seleccionar texto, ni cambios
+de la acción global de KOReader. Un guardado fallido tampoco subraya.
+
+La petición final se aclaró como subrayado al GUARDAR tarjeta, no al generarla;
+se retiró el disparador de generación y se conserva la preferencia anterior
+`highlight_on_generate` mediante migración en memoria si falta `highlight_on_save`.
+el intento local de interceptar selección se retiró antes de instalar nada.
+Instalados y verificados los cinco módulos afectados en el Kobo 192.168.50.132;
+configuración privada y tarjetas conservaron sus hashes. Suites Lua/Python
+completas y pruebas de generación simulada en el dispositivo correctas.
+No se crearon respaldos, no se enviaron tarjetas ni se subrayaron libros reales
+durante las pruebas. Las demás modificaciones previas del árbol se preservan.
+
+## Envío automático sin bloquear la lectura
+
+Sustituido el lote síncrono del temporizador por auto_send.lua y un proceso
+de baja prioridad gestionado por ffi/util. Toda red/DNS/TTS queda fuera del hilo
+de UI, también la prueba de conexión. En UI se usa solo el estado Wi-Fi cacheado.
+Una tarjeta/proceso, sin solapamientos; pausas 1/2/5/10/30 minutos tras fallos,
+límite 120 s y cancelación/recolección al salir, suspender o desactivar el ajuste.
+
+El hijo devuelve recibos sin escribir la colección local; card_storage aplica
+solo los que aún coinciden con la instantánea pendiente. Los diarios persistentes
+en settings/ankiflashcards/runtime permiten reconciliar tras un cierre y pausan
+escrituras inciertas sin reenvío ciego. No se guardan claves API en el diario.
+Se protegen tarjetas editadas/borradas durante el trabajo.
+
+Diagnóstico del Kobo en 192.168.0.141: 8 pendientes, automático desactivado y
+Anki aún apuntando a 192.168.50.213. El Mac está ahora en 192.168.0.100.
+No se cambió esa configuración ni se enviaron tarjetas reales en las pruebas.
+
+Instalado en 192.168.0.141 el 2026-10-15 (`20261015-100645`), sin respaldos.
+Prueba nativa de solo lectura: fork en 0,014 s, 51 sondeos no bloqueantes del
+padre durante una espera de red de 5,14 s. Cero envíos de tarjetas en las pruebas.
+Configuración y datos verificados sin cambios; el envío automático sigue
+desactivado y no se cambió la URL guardada de Anki.
+
+## Todos los datos dentro de plugins o settings
+
+La configuración privada sigue dentro del complemento. Las tarjetas, imágenes,
+base de sincronización y archivos auxiliares pasan a `settings/ankiflashcards/`.
+storage_paths.lua centraliza rutas y una migración por renombrado, sin cambios
+de bytes ni mezcla destructiva de datos restaurados. Se trasladan también los
+tres scripts auxiliares antiguos de /tmp si existen. Imágenes generadas,
+recuperadas de Anki y sincronización usan las mismas rutas nuevas.
+
+Las referencias antiguas a imágenes se resuelven al cargar; solo se actualiza
+la huella local si antes estaba limpia, sin ocultar cambios genuinos de contenido.
+No se tocan anotaciones del libro ni datos de otros complementos.
+
+Instalado y migrado en el Kobo el 2026-10-15 (`20261015-004401`), sin respaldos.
+Configuración conservada y hashes de datos trasladados idénticos. La raíz ya no
+contiene entradas Anki. El archivo de tarjetas de origen ya estaba vacío (2 bytes,
+fecha anterior al traslado); se conservó exactamente, sin recuperación automática.
+Requiere reiniciar KOReader antes de continuar para abandonar las rutas antiguas
+del código aún cargado en memoria.
+
+## Ajustes dentro de la carpeta del complemento
+
+La configuración activa pasa a `AnkiFlashcards.koplugin/anki_flashcards_settings.json`,
+resuelta desde la ubicación real de card_storage.lua para admitir instalaciones
+externas o carpetas renombradas. Se migra por renombrado el archivo antiguo solo
+si falta el local y contiene JSON válido. Se preservan bytes, claves y valores;
+un archivo local restaurado con ChronoSync siempre tiene prioridad. Fallos de
+traslado conservan el archivo anterior utilizable y generan un aviso.
+
+El JSON activo y su temporal quedan ignorados por Git. Las siguientes instalaciones
+deben excluirlos del paquete local y preservar el JSON remoto, igual que
+configuration.lua. Tarjetas e imágenes conservan sus ubicaciones actuales.
+
+Instalado y migrado en el Kobo el 2026-10-15 (`20261015-003144`), sin respaldos.
+Se verificó igualdad de bytes del JSON antes/después y que el archivo antiguo
+ya no existe. Tarjetas e imágenes sin cambios. Reiniciar KOReader antes de
+editar ajustes para reemplazar el código antiguo aún cargado en memoria.
+
 ## Corrección de superposición en Mis tarjetas (IMG_0408)
 
 Se usaba `perpage`, que KOReader recalcula desde la preferencia global y por

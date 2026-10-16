@@ -218,8 +218,11 @@ local function ensure_model(url, kind)
     return true
 end
 
-local function record_delivery(card, note, id, status, source)
+local function record_delivery(card, note, id, status, source, options)
     local receipt = {note_id = id, deck = note.deckName, model = note.modelName, status = status, source = source}
+    -- Background workers may contact Anki, but must never rewrite a stale
+    -- forked copy of the local card collection. The UI reconciles this receipt.
+    if options and options.defer_persistence then return true, nil, receipt end
     local saved, err = CardStorage.record_sent(card, receipt)
     if not saved then
         return nil, "Anki received the card, but its local sent status could not be saved: "
@@ -233,7 +236,7 @@ end
 -- card:       { phrase, ipa, definition, synonyms, text, source }
 -- tts_config: full CONFIGURATION table (optional — provides elevenlabs_api_key)
 -- Returns true or nil + error string.
-function AnkiSync.send_card(config, card, tts_config)
+function AnkiSync.send_card(config, card, tts_config, options)
     if not config or not config.url or config.url == "" then
         return nil, "Anki URL not configured"
     end
@@ -311,7 +314,7 @@ function AnkiSync.send_card(config, card, tts_config)
     if existing == nil then return nil, search_err end
     if existing then
         if existing_deck then note.deckName = existing_deck end
-        return record_delivery(card, note, existing, "existing", verified_source)
+        return record_delivery(card, note, existing, "existing", verified_source, options)
     end
 
     if not is_learning then
@@ -386,13 +389,13 @@ function AnkiSync.send_card(config, card, tts_config)
             local id, _, actual_deck = find_existing(config.url, note, legacy_deck)
             if id then
                 if actual_deck then note.deckName = actual_deck end
-                return record_delivery(card, note, id, "existing", verified_source)
+                return record_delivery(card, note, id, "existing", verified_source, options)
             end
         end
         return nil, result.error
     end
     if type(result.result) ~= "number" then return nil, "Invalid addNote response" end
-    return record_delivery(card, note, result.result, "created", verified_source)
+    return record_delivery(card, note, result.result, "created", verified_source, options)
 end
 
 return AnkiSync

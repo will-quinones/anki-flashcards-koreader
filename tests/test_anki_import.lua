@@ -9,8 +9,9 @@ local local_cards = {[2] = original, [30] = {phrase = "gamma", definition = "KEE
 local lookup_failure = false
 package.loaded["ui/uimanager"] = {scheduleIn = function(_, _, callback) queue[#queue+1] = callback end}
 package.loaded.datastorage = {getDataDir = function() return "/fake" end}
+require("storage_paths").initialize = function() return true end -- Migration tested separately.
 package.loaded["libs/libkoreader-lfs"] = {
-    attributes = function(path) if path == "/fake/.anki_images" then return "directory" end; return files[path] end,
+    attributes = function(path) if path == "/fake/settings/ankiflashcards/images" then return "directory" end; return files[path] end,
     mkdir = function() return true end,
 }
 package.loaded.mime = {unb64 = function() return "image-bytes" end}

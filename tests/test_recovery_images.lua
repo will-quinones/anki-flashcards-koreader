@@ -9,8 +9,9 @@ local json = {encode = function(v) serial = serial + 1; local k = tostring(seria
     decode = function(k) return copy(blobs[k]) end}
 package.loaded.json = json
 package.loaded.datastorage = {getDataDir = function() return "/fake" end}
+require("storage_paths").initialize = function() return true end -- Migration tested separately.
 package.loaded["ui/uimanager"] = {scheduleIn = function(_, _, fn) queue[#queue+1] = fn end}
-package.loaded["libs/libkoreader-lfs"] = {attributes = function(path) return path == "/fake/.anki_images" and "directory" or files[path] end,
+package.loaded["libs/libkoreader-lfs"] = {attributes = function(path) return path == "/fake/settings/ankiflashcards/images" and "directory" or files[path] end,
     mkdir = function() return true end}
 package.loaded.mime = {unb64 = function(s) return s end}
 local Storage = require("card_storage")

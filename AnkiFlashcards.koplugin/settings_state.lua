@@ -27,7 +27,9 @@ function State.merge(base, saved)
     end
     clear_blanks(cfg)
     if cfg.deck_mode ~= "configured" then cfg.deck_mode = "book" end
-    for _, key in ipairs({"split_card_types", "auto_send_wifi", "tts_enabled", "cloud_auto_sync"}) do cfg[key] = cfg[key] == true end
+    if cfg.highlight_on_save == nil then cfg.highlight_on_save = cfg.highlight_on_generate end
+    cfg.highlight_on_generate = nil -- Preserve the previous checkbox preference, not its trigger.
+    for _, key in ipairs({"split_card_types", "auto_send_wifi", "tts_enabled", "cloud_auto_sync", "highlight_on_save"}) do cfg[key] = cfg[key] == true end
     if type(cfg.sync_server) ~= "table" then cfg.sync_server = nil end
     return cfg
 end

@@ -57,3 +57,43 @@ source = {selected = "palabra", context = "palabra", context_quality = "selectio
 Learning.start({}, ui, {text = source.selected})
 assert(generated == 1 and notices[#notices]:find("contexto suficiente", 1, true))
 print("PASS: learning selection → preview → save/send, source reuse, and no repeated generation for saved/sent cards")
+
+local A=require("annotation_tools")
+local applied={}
+local original_highlight=A.highlight_saved
+A.highlight_saved=function(cfg, _, card)
+    assert(card.kind=="learn" and generated>1)
+    applied[#applied+1]=cfg.highlight_on_save
+    return true
+end
+source={selected="Otra idea completa del libro",context="Contexto de una idea nueva.",context_quality="document",title="Libro",author="Autor"}
+Learning.start({highlight_on_save=true},ui,{text=source.selected})
+assert(#applied==0)
+while #queue>0 do table.remove(queue,1)() end
+assert(#applied==0)
+local save=package.loaded.card_storage.save_learning_card
+package.loaded.card_storage.save_learning_card=function() return nil,"failed" end
+assert(not views[#views].on_save() and #applied==0)
+package.loaded.card_storage.save_learning_card=save
+views[#views].on_save()
+assert(#applied==1 and applied[1]==true)
+Learning.start({highlight_on_save=true},ui,{text=source.selected})
+assert(#applied==1) -- Opening an existing card must not recreate its annotation.
+views[#views].on_regenerate()
+while #queue>0 do table.remove(queue,1)() end
+assert(#applied==1) -- Regeneration isn't a new source selection.
+source.selected="Una tercera idea completa del libro"
+Learning.start({highlight_on_save=false},ui,{text=source.selected})
+while #queue>0 do table.remove(queue,1)() end
+assert(#applied==1)
+assert(views[#views].on_save())
+assert(#applied==2 and applied[2]==false)
+package.loaded.card_generator.generate_learning=function() return nil,"Fallo simulado" end
+source.selected="Una cuarta idea completa del libro"
+Learning.start({highlight_on_save=true},ui,{text=source.selected})
+while #queue>0 do table.remove(queue,1)() end
+assert(#applied==2)
+A.highlight_saved=function() return nil,"Highlight failed" end
+assert(views[#views].on_save())
+A.highlight_saved=original_highlight
+print("PASS: Learn highlights only after explicit successful save, not preview, failed save, opening or regeneration; highlight errors preserve saved cards")

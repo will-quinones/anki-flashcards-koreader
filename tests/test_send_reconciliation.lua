@@ -74,3 +74,11 @@ assert(ok, err)
 assert(receipt.status == "existing" and receipt.deck == "Spanish::Koreader::Child")
 for _, call in ipairs(calls) do assert(call.action ~= "addNote") end
 print("PASS: renaming a typed subdeck recognizes vocabulary already in a sibling subdeck")
+for _, kind in ipairs({"existing", "new", "race"}) do
+    scenario, search_count, calls, saved = kind, 0, {}, {}
+    local pending = {phrase = "palabra"}
+    local delivered, err, result = Sync.send_card(cfg, pending, nil, {defer_persistence = true})
+    assert(delivered, err)
+    assert(result.note_id and #saved == 0 and not pending.sent_to_anki)
+end
+print("PASS: forked sends return receipts without writing local cards for new, existing or racing notes")

@@ -51,14 +51,40 @@ prioridad sobre los valores del archivo.
 
 | Archivo/carpeta dentro de KOReader | Contenido |
 |---|---|
-| `anki_flashcards_settings.json` | Ajustes y API keys. Respáldalo; no lo publiques. |
+| `plugins/AnkiFlashcards.koplugin/anki_flashcards_settings.json` | Ajustes y API keys activos. No lo publiques. |
 | `plugins/AnkiFlashcards.koplugin/configuration.lua` | Configuración opcional y posibles claves. |
-| `anki_flashcards.json` | Tarjetas y estados de envío. |
-| `.anki_images/` | Imágenes locales. |
+| `settings/ankiflashcards/anki_flashcards.json` | Tarjetas y estados de envío. |
+| `settings/ankiflashcards/images/` | Imágenes locales. |
+| `settings/ankiflashcards/runtime/` | Scripts auxiliares y archivos de trabajo. |
 
 Una actualización normal no debe borrar tarjetas ni imágenes. Una limpieza
 de datos debe ser una decisión explícita. Para respaldos de configuración,
 conserva solo los archivos de ajustes/claves; no hace falta copiar el código.
+
+Los ajustes se guardan en la **carpeta real del complemento**, de modo que una
+sincronización de `/plugins` con ChronoSync los incluye. Si solo existe el antiguo
+`koreader/anki_flashcards_settings.json`, el primer arranque lo valida y lo mueve
+sin cambiar sus bytes. Si ya hay un archivo dentro del complemento (por ejemplo,
+restaurado con ChronoSync), tiene prioridad y nunca se sobrescribe con el antiguo.
+Un archivo local inválido no se reemplaza automáticamente. Si el traslado falla,
+se conserva el archivo anterior y se muestra un aviso.
+
+**Al instalar una actualización**, conserva tanto `configuration.lua` como
+`anki_flashcards_settings.json` del dispositivo antes de sustituir la carpeta del
+plugin. No empaquetes ajustes personales ni sus archivos `.tmp`: están excluidos
+de Git. Las tarjetas y las imágenes antiguas se trasladan automáticamente a
+`settings/ankiflashcards/`, junto con la base de sincronización y los auxiliares.
+La migración no fusiona ni sobrescribe datos si ambas ubicaciones contienen
+archivos: conserva ambas y muestra un aviso. Las rutas antiguas de imágenes se
+resuelven al cargarlas sin modificar el contenido de las tarjetas. Las claves
+permanecen en el JSON privado dentro del complemento, no en la carpeta de datos.
+Durante las pruebas de esta copia no se crean respaldos automáticos.
+
+Con esta distribución, guardar **`/plugins` y `/settings`** incluye toda la
+configuración y los datos propios del complemento. Cierra KOReader antes de
+restaurar o sincronizar esos archivos con ChronoSync para evitar escrituras
+simultáneas. Si ChronoSync propaga eliminaciones, revisa esa política antes de
+sincronizar la migración en otros dispositivos.
 
 ## Menús
 
@@ -109,8 +135,13 @@ al elegir explícitamente la acción Anki correspondiente.
    y antes de actuar, no mediante consultas continuas en segundo plano.
 5. Guardar conserva la tarjeta en el lector. Enviar también la guarda
    localmente, con el ID de la nota y el estado de entrega.
-   **Subrayar** es una acción opcional disponible en la vista previa: generar
-   una tarjeta no crea ya un subrayado automáticamente. Si el fragmento ya
+    **Subrayar** es una acción opcional disponible en la vista previa. También
+     puedes activar **Configuración → Generación de tarjetas → Subrayar al guardar
+    tarjeta** para subrayar automáticamente la selección original después de
+     pulsar **Guardar** y guardar correctamente una tarjeta Vocab o Learn, solo
+     si la selección original contiene más de una palabra. Generar
+     la vista previa no subraya. Está desactivado por
+    defecto, conservando el comportamiento de esta copia instalada. Si el fragmento ya
    está subrayado aparece **✓ Subrayado** y no se duplica. Solo se permite en
    el libro original con posiciones válidas; no se reconstruyen posiciones
    inexistentes de tarjetas recuperadas desde Anki.
@@ -130,6 +161,25 @@ al elegir explícitamente la acción Anki correspondiente.
 
 El idioma controla la tarjeta completa, no solo la traducción de una
 definición. Para tarjetas monolingües en español, usa `Spanish` y texto en español.
+
+La opción **Subrayar al guardar tarjeta** afecta solo al botón **Guardar**,
+no al gesto de seleccionar texto ni al diccionario. No cambia la acción
+predeterminada global de KOReader. No borra subrayados existentes o creados por
+el propio lector; con la opción apagada puedes seguir usando **Subrayar** en la
+vista previa. Un fallo al guardar, generar la vista previa, abrir una tarjeta existente, regenerarla,
+recuperarla desde Anki o generar desde la lista de anotaciones no crea un nuevo
+subrayado por esta opción. Se usan las posiciones capturadas y la API nativa,
+con comprobación del libro original y sin duplicar. Si falla el subrayado, la
+tarjeta queda guardada y se muestra un aviso; no se envía nada a Anki por ello.
+Enviar y los guardados automáticos internos no activan este subrayado. Se conserva
+el valor de la casilla anterior al actualizar, pero su efecto pasa al botón Guardar.
+Una sola palabra no se subraya automáticamente; el botón manual **Subrayar**
+sigue disponible. En el menú de selección solo quedan **Anki Vocab** y **Anki
+Learn** como accesos Anki. Se retiraron **Anki Manage**, **My Cards** y el panel
+Manage antiguo; las funciones actuales siguen en **Herramientas → Anki Flashcards**.
+Los botones **Anki Vocab** y **Anki Learn** del diccionario se pueden activar,
+desactivar y ordenar desde la configuración nativa **Ordenar y alternar botones**.
+Si ya tenías una disposición personalizada, actívalos allí para añadirlos.
 
 Los avisos de generación son cortos y comunes a Vocab/Learn: **Generando
 tarjeta…** y **Regenerando tarjeta…**, sin repetir el fragmento seleccionado.
@@ -255,6 +305,27 @@ Las **etiquetas adicionales** son opcionales. `KOReader`, `KOReader::Vocab`
 y `KOReader::Learn` son automáticas y no hay que introducirlas. El envío
 automático de pendientes se activa aquí; necesita Anki accesible y no es
 sincronización con AnkiWeb.
+
+El envío automático no hace HTTP, DNS ni TTS en el hilo de lectura: usa un
+proceso separado de baja prioridad, con una sola tarjeta en vuelo. El primer
+intento es a los 30 segundos; solo consulta el estado de Wi-Fi ya conocido por
+KOReader, sin encenderlo ni hacer comprobaciones DNS desde la interfaz. No hay
+peticiones si no existen tarjetas pendientes. Si Anki está cerrado o inaccesible,
+falla una única comprobación y espera 1, 2, 5, 10 y hasta 30 minutos entre intentos;
+no repite el mismo fallo por cada tarjeta de la cola. El siguiente intento se
+programa después de terminar, no mientras otro sigue activo.
+
+Cada proceso tiene un límite de 120 segundos y se cancela al cerrar el libro,
+suspender KOReader o desactivar el ajuste. Se conservan intención y comprobante
+en `settings/ankiflashcards/runtime/auto-send-*.json`, sin guardar claves API en
+ellos. Solo la interfaz actualiza la colección local, y únicamente si la tarjeta
+no fue borrada o modificada mientras se enviaba. Si una interrupción deja dudas
+sobre una escritura remota, el envío automático se pausa hasta comprobarlo con
+**Recuperar desde Anki** o resolverlo manualmente; no se reenvía a ciegas. Una
+entrega ya completada puede reconciliarse al reabrir sin enviar otra vez.
+
+Al cambiar de red, actualiza la dirección del ordenador en Conexión con Anki:
+el Wi-Fi conectado no demuestra que AnkiConnect esté disponible en la IP antigua.
 
 Las barajas se crean si faltan. Cambiar estas opciones **no mueve notas
 existentes**. Al activar la separación, se reconoce vocabulario previamente

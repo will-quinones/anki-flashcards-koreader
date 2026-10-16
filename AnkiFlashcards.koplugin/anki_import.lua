@@ -2,7 +2,7 @@
 local AnkiSync = require("anki_sync")
 local Storage = require("card_storage")
 local UIManager = require("ui/uimanager")
-local DataStorage = require("datastorage")
+local Paths = require("storage_paths")
 local lfs = require("libs/libkoreader-lfs")
 local mime = require("mime")
 local Learn = require("learning_card")
@@ -34,11 +34,9 @@ local function download_image(url, note)
     local data, err = AnkiSync.read(url, "retrieveMediaFile", {filename = name})
     if type(data) ~= "string" or data == "" then return nil, err or "Image not found in Anki" end
     if #data > 12 * 1024 * 1024 then return nil, "Image too large for this reader" end
-    local dir = DataStorage:getDataDir() .. "/.anki_images"
-    if lfs.attributes(dir, "mode") ~= "directory" then
-        local made, mkdir_err = lfs.mkdir(dir)
-        if not made then return nil, mkdir_err end
-    end
+    local ready, path_err = Paths.initialize()
+    if not ready then return nil, path_err end
+    local dir = Paths.images
     local extension = name:lower():match("%.(%w+)$") or "png"
     local formats = {png = true, jpg = true, jpeg = true, gif = true, webp = true}
     if not formats[extension] then return nil, "Unsupported image format" end

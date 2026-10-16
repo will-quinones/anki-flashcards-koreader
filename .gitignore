@@ -1,3 +1,6 @@
 AnkiFlashcards.koplugin/configuration.lua
+AnkiFlashcards.koplugin/anki_flashcards_settings.json
+AnkiFlashcards.koplugin/anki_flashcards_settings.json.tmp
 __pycache__/
 .pytest_cache/
+.DS_Store

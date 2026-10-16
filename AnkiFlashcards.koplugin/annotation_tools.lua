@@ -85,6 +85,38 @@ function A.highlight(ui, snapshot)
     if ok and type(index) == "number" then return true, nil, index end
     return nil, "No se pudo crear el subrayado. No se volverá a intentar automáticamente."
 end
+function A.has_multiple_words(value)
+    local selected = text(value)
+    -- Lua's %s is ASCII-only. Normalize common Unicode word separators too.
+    for _, space in ipairs({"\194\160", "\225\154\128", "\226\128\128", "\226\128\129",
+        "\226\128\130", "\226\128\131", "\226\128\132", "\226\128\133", "\226\128\134",
+        "\226\128\135", "\226\128\136", "\226\128\137", "\226\128\138", "\226\128\168",
+        "\226\128\169", "\226\128\175", "\226\129\159", "\227\128\128"}) do
+        selected = selected:gsub(space, " ")
+    end
+    local words = 0
+    for token in selected:gmatch("%S+") do
+        token = token:gsub("%p", "")
+        for _, punctuation in ipairs({"«", "»", "“", "”", "‘", "’", "–", "—", "…", "¿", "¡", "。", "、", "！", "？"}) do
+            token = token:gsub(punctuation, "")
+        end
+        if token ~= "" then
+            words = words + 1
+            if words > 1 then return true end
+        end
+    end
+    return false
+end
+function A.highlight_saved(config, ui, card)
+    if not config or config.highlight_on_save ~= true then return true end
+    local snapshot = card and card.annotation_source
+    if snapshot and snapshot.selection and not A.has_multiple_words(snapshot.selection.text) then return true end
+    -- Only called after the explicit Save action succeeds. Preview generation,
+    -- automatic persistence, imports and editing never call this hook.
+    local ok, created, err, index = pcall(A.highlight, ui, card and card.annotation_source)
+    if not ok then return nil, "La tarjeta se guardó, pero no se pudo subrayar la selección." end
+    return created, err, index
+end
 function A.find_card(snapshot, kind, cards, exact_source_only)
     if not snapshot then return nil end
     local selection, book = snapshot.selection, snapshot.book

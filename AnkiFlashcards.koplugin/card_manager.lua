@@ -235,9 +235,8 @@ function CardManager.recover_from_anki(base_config)
     })
 end
 
-function CardManager.show_manage(base_config, opts, collect)
-    local manage_menu
-
+-- Actions are consumed directly by KOReader's native Tools menu.
+function CardManager.menu_items(base_config, opts)
     local item_table = {
         {
             text = _("Sincronizar entre lectores"),
@@ -290,7 +289,6 @@ function CardManager.show_manage(base_config, opts, collect)
             bold     = true,
             enabled  = opts and opts.on_inbox ~= nil or false,
             callback = function()
-                if manage_menu then UIManager:close(manage_menu) end
                 if opts and opts.on_inbox then opts.on_inbox() end
             end,
         },
@@ -304,29 +302,13 @@ function CardManager.show_manage(base_config, opts, collect)
                     ok_callback = function()
                         CardStorage.clear_all()
                         notify(_("All cards cleared"))
-                        if manage_menu then UIManager:close(manage_menu) end
                     end,
                 })
             end,
         },
     }
 
-    if collect then collect(item_table); return end
-    manage_menu = Menu:new {
-        title      = _("Manage"),
-        item_table = item_table,
-        is_borderless = true,
-        onReturn = function(self) UIManager:close(self) end,
-    }
-    UIManager:show(manage_menu)
-end
-
--- The native Tools menu reuses card actions, but never settings entries.
-function CardManager.menu_items(base_config, opts)
-    local items
-    -- Build the same actions without showing a second configuration panel.
-    CardManager.show_manage(base_config, opts, function(actions) items = actions end)
-    return items
+    return item_table
 end
 
 CardManager.show_stats = show_stats

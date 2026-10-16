@@ -1,4 +1,5 @@
 -- In-memory filesystem: never writes actual keys or files.
+package.path = "AnkiFlashcards.koplugin/?.lua;" .. package.path
 package.loaded.datastorage = {getDataDir = function() return "/fake" end}
 local encode_fail, write_fail, rename_fail = false, false, false
 package.loaded.json = {encode = function()
@@ -6,7 +7,7 @@ package.loaded.json = {encode = function()
     return "new-settings"
 end}
 local Storage = dofile("AnkiFlashcards.koplugin/card_storage.lua")
-local file = "/fake/anki_flashcards_settings.json"
+local file = "AnkiFlashcards.koplugin/anki_flashcards_settings.json"
 local files = {[file] = "original-settings"}
 local open, rename, remove = io.open, os.rename, os.remove
 io.open = function(path)

@@ -290,6 +290,13 @@ end
 
 function AnkiFlashcards:init()
     self.ui.menu:registerToMainMenu(self)
+    if CardStorage.migrate_data then CardStorage.migrate_data() end
+    local storage_warning = CardStorage.settings_migration_error or CardStorage.settings_load_error or CardStorage.data_migration_error
+    if storage_warning then
+        UIManager:scheduleIn(0, function()
+            if not self.ui.tearing_down then UIManager:show(InfoMessage:new {text = storage_warning}) end
+        end)
+    end
     -- Settings and saved cards are also accessible from the file browser.
     if not self.ui.highlight then return end
 
@@ -341,7 +348,8 @@ function AnkiFlashcards:init()
                     source = author
                 end
 
-                -- Highlighting is an explicit action in the generated preview.
+                -- The selection is captured first; optional highlighting
+                -- only runs after the explicit Save action succeeds.
                 ui.highlight:onClose()
 
                 local function on_generated(card)
@@ -391,6 +399,10 @@ function AnkiFlashcards:init()
                             on_save = function()
                                 local ok2, save_err = CardStorage.save_card(c)
                                 if ok2 then
+                                    local highlighted, highlight_err = Annotations.highlight_saved(get_anki_config(), ui, c)
+                                    if not highlighted then
+                                        UIManager:show(Notification:new {text = highlight_err or _("La tarjeta se guardó, pero no se pudo subrayar."), timeout = 5})
+                                    end
                                     return true
                                 else
                                     local msg = (save_err == "already_saved")
@@ -569,8 +581,7 @@ function AnkiFlashcards:init()
         self.ui.dictionary:addToDictButtons({
             id = "ankiflashcards_card",
             text = _("Anki Vocab"),
-            conditional = true,
-            row_group = "anki_actions",
+            menu_text = _("Anki Vocab"),
             show_func = function(popup)
                 return not popup.is_wiki and popup.highlight ~= nil
                     and self.ui.highlight.selected_text ~= nil
@@ -584,7 +595,7 @@ function AnkiFlashcards:init()
         })
         self.ui.dictionary:addToDictButtons({
             id = "ankiflashcards_learn", text = _("Anki Learn"),
-            conditional = true, row_group = "anki_actions",
+            menu_text = _("Anki Learn"),
             show_func = function(popup)
                 return not popup.is_wiki and popup.highlight ~= nil
                     and self.ui.highlight.selected_text ~= nil
@@ -596,42 +607,6 @@ function AnkiFlashcards:init()
             end,
         })
     end
-
-    -- ── Entry 2: Anki Manage (includes Anki Inbox) ───────────────────────────
-    self.ui.highlight:addToHighlightDialog("ankiflashcards_2", function(_rhi)
-        return {
-            text    = _("Anki Manage"),
-            enabled = true,
-            callback = function()
-                local ui = self.ui
-                self.ui.highlight:onClose()
-                CardManager.show_manage(CONFIGURATION, {
-                    ui = ui,
-                    on_inbox = function()
-                        HighlightInbox.show(ui, CONFIGURATION)
-                    end,
-                })
-            end,
-        }
-    end)
-
-    -- ── Entry 3: My Cards ─────────────────────────────────────────────────────
-    self.ui.highlight:addToHighlightDialog("ankiflashcards_3", function(rhi, index)
-        return {
-            text    = _("My Cards"),
-            enabled = true,
-            callback = function()
-                local selection = rhi.selected_text and require("util").tableDeepCopy(rhi.selected_text)
-                self.ui.highlight:onClose()
-                CardManager.show(CONFIGURATION, nil, self.ui, nil, function()
-                    if not self.ui.tearing_down and selection then
-                        rhi.selected_text = selection
-                        rhi:onShowHighlightMenu(index)
-                    end
-                end)
-            end,
-        }
-    end)
 
     -- ── Tap-to-Show Flashcard ─────────────────────────────────────────────────
     -- Saved cards never intercept a highlight tap: keep the usual action menu.
@@ -738,36 +713,10 @@ function AnkiFlashcards:init()
         return orig_onTap(hl_self, arg, ges)
     end
 
-    -- ── Auto-Send on WiFi ────────────────────────────────────────────────────
-    -- Polls every 60s. When WiFi is on and auto_send_wifi is enabled,
-    -- flushes all unsent cards to AnkiConnect in the background.
-    local AUTO_SEND_INTERVAL = 60
-    local function auto_send_tick()
-        UIManager:scheduleIn(AUTO_SEND_INTERVAL, auto_send_tick)
-        local cfg = get_anki_config()
-        if not cfg.auto_send_wifi then return end
-        if not cfg.url or cfg.url == "" then return end
-        if not NetworkMgr:isOnline() then return end
-
-        local cards = CardStorage.load_cards()
-        local sent = 0
-        for _, card in ipairs(cards) do
-            if not card.sent_to_anki and not Recovery.needs_review(card) then
-                local ok = AnkiSync.send_card(cfg, card, CONFIGURATION)
-                if ok then
-                    sent = sent + 1
-                end
-            end
-        end
-        if sent > 0 then
-            UIManager:show(Notification:new {
-                text    = sent .. _(" card(s) sent to Anki"),
-                timeout = 3,
-            })
-        end
-    end
-    -- First check after 30s to let KOReader settle on startup.
-    UIManager:scheduleIn(30, auto_send_tick)
+    -- HTTP/DNS is isolated in a cancellable low-priority process, not a UI tick.
+    if self._auto_send then self._auto_send:stop() end
+    self._auto_send = require("auto_send").new {ui = self.ui, base = CONFIGURATION, get_config = get_anki_config}
+    self._auto_send:start()
 
     -- ── Auto-Sync on Startup ──────────────────────────────────────────────
     -- One-shot silent cloud sync 45s after startup.
@@ -780,6 +729,22 @@ function AnkiFlashcards:init()
 
 end
 
+function AnkiFlashcards:onCloseDocument()
+    self._auto_send_resume = false
+    if self._auto_send then self._auto_send:stop() end
+end
+function AnkiFlashcards:onExit()
+    self:onCloseDocument()
+end
+function AnkiFlashcards:onSuspend()
+    self._auto_send_resume = self._auto_send and self._auto_send.running
+    if self._auto_send then self._auto_send:stop() end
+end
+function AnkiFlashcards:onResume()
+    if self._auto_send_resume and self._auto_send then self._auto_send:start() end
+    self._auto_send_resume = false
+end
+
 function AnkiFlashcards:addToMainMenu(menu_items)
     menu_items.ankiflashcards = {
         text = _("Anki Flashcards"),
@@ -790,6 +755,7 @@ function AnkiFlashcards:addToMainMenu(menu_items)
                 sub_item_table_func = function()
                     return SettingsViewer.menu_items(CONFIGURATION, function(cfg)
                         SettingsState.apply(CONFIGURATION, cfg)
+                        if self._auto_send then self._auto_send:settings_changed() end
                     end, self.ui)
                 end,
             },

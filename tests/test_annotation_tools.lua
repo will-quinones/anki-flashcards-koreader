@@ -36,4 +36,35 @@ pdf.selection.pos0.x = pdf.selection.pos0.x + 0.000001
 assert(A.highlight(ui, pdf) and writes == 2) -- JSON float round-trip does not duplicate PDF highlights
 local missing_boxes = A.capture(ui, {text = "PDF", pos0 = {page = 8, x = 10}, pos1 = {page = 8, x = 90}})
 assert(not A.can_highlight(ui, missing_boxes))
+for _, selected in ipairs({"palabra", "  palabra  ", "palabra ,", "«palabra» — …", "state-of-the-art", "", "— ..."}) do
+    assert(not A.has_multiple_words(selected), selected)
+    local single = {}
+    A.bind(single, A.capture(ui, {text=selected,pos0="single-start",pos1="single-end"}))
+    assert(A.highlight_saved({highlight_on_save=true},ui,single) and writes==2)
+end
+assert(not A.has_multiple_words(nil))
+for _, selected in ipairs({"dos palabras", "dos\npalabras", "dos\tpalabras", "dos\194\160palabras", "dos\226\128\175palabras", "dos — palabras", "acción rápida"}) do
+    assert(A.has_multiple_words(selected), selected)
+end
+-- Count the captured selection, never the generated question or its context.
+local single = {question="Una pregunta de varias palabras",selected_text="Varias palabras generadas"}
+A.bind(single,A.capture(ui,{text="única",pos0="single-start",pos1="single-end"}))
+assert(A.highlight_saved({highlight_on_save=true},ui,single) and writes==2)
+local generated = {kind="learn"}
+local fresh = A.capture(ui, {text="una selección generada",pos0={page=10,x=10},pos1={page=10,x=90},pboxes={{x=10}}})
+A.bind(generated,fresh)
+assert(A.highlight_saved({},ui,generated) and writes==2)
+assert(A.highlight_saved({highlight_on_save=false},ui,generated) and writes==2)
+assert(A.highlight_saved({highlight_on_save=true},ui,generated) and writes==3)
+assert(A.highlight_saved({highlight_on_save=true},ui,generated) and writes==3)
+assert(ui.highlight.selected_text==previous)
+ui.tearing_down=true
+assert(not A.highlight_saved({highlight_on_save=true},ui,generated) and writes==3)
+ui.tearing_down=false
+ui.document.file="/another.pdf"
+assert(not A.highlight_saved({highlight_on_save=true},ui,generated) and writes==3)
+ui.document.file="/book.pdf"
+assert(not A.highlight_saved({highlight_on_save=true},ui,{}) and writes==3)
 print("PASS: optional native highlights preserve selections, deduplicate EPUB/PDF and reject the wrong book")
+print("PASS: save highlighting is opt-in, deduplicated, preserves other selections and refuses missing provenance, another book or teardown")
+print("PASS: automatic save highlight requires multiple selected words, handles Unicode spaces and ignores standalone punctuation; manual single-word highlighting remains available")

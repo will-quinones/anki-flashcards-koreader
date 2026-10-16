@@ -9,6 +9,7 @@ local json = {encode = function(value) serial = serial + 1; local token = tostri
     decode = function(token) return copy(blobs[token]) end}
 package.loaded.json = json
 package.loaded.datastorage = {getDataDir = function() return "/fake" end}
+require("storage_paths").initialize = function() return true end -- Migration tested separately.
 package.loaded["ui/uimanager"] = {scheduleIn = function(_, _, callback) queue[#queue+1] = callback end}
 package.loaded["libs/libkoreader-lfs"] = {attributes = function(path) return files[path] end, mkdir = function() return true end}
 package.loaded.mime = {unb64 = function(value) return value end}
@@ -65,7 +66,7 @@ end
 local function mutate(id, callback)
     local cards = Storage.load_cards()
     for _, card in ipairs(cards) do if card.anki_note_id == id then callback(card) end end
-    files["/fake/anki_flashcards.json"] = json.encode(cards)
+    files["/fake/settings/ankiflashcards/anki_flashcards.json"] = json.encode(cards)
 end
 local report = scan()
 assert(report.imported == 2 and report.failed == 0)

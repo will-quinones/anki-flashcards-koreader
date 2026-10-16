@@ -17,10 +17,10 @@ local http        = require("socket.http")
 local ltn12       = require("ltn12")
 local json        = require("json")
 local mime        = require("mime")
-local DataStorage = require("datastorage")
+local Paths       = require("storage_paths")
 local Feedback = require("generation_feedback")
 
-local IMAGE_DIR = DataStorage:getDataDir() .. "/.anki_images"
+local IMAGE_DIR = Paths.images
 
 local ImageGenerator = {}
 local pending = {}
@@ -31,7 +31,8 @@ end
 -- ── Shared helpers ──────────────────────────────────────────────────────────
 
 local function ensure_image_dir()
-    os.execute("mkdir -p '" .. IMAGE_DIR .. "'")
+    local ok, err = Paths.initialize()
+    if not ok then error(err) end
 end
 
 -- Build a unique filename from the phrase + timestamp.
@@ -258,9 +259,9 @@ local function url_encode(str)
     end):gsub(" ", "%%20"))
 end
 
--- Write a self-contained download helper to /tmp so we can run it as a
+-- Write a self-contained download helper in the plugin runtime folder as a
 -- background luajit subprocess without blocking the KOReader UI thread.
-local DOWNLOAD_HELPER = "/tmp/anki_download.lua"
+local DOWNLOAD_HELPER = Paths.runtime .. "/anki_download.lua"
 
 local function ensure_download_helper()
     local f = io.open(DOWNLOAD_HELPER, "r")
@@ -473,7 +474,7 @@ end
 
 -- Background POST helper — runs API call + image extraction in a luajit
 -- subprocess so the UI thread is never blocked.
-local POST_HELPER = "/tmp/anki_post_image.lua"
+local POST_HELPER = Paths.runtime .. "/anki_post_image.lua"
 
 local function ensure_post_helper()
     local f = io.open(POST_HELPER, "r")
@@ -635,7 +636,7 @@ end
 -- Background POST helper for OpenRouter — uses the chat completions endpoint
 -- with modalities=["image"]. Response contains base64 data-URL in
 -- choices[].message.images[].image_url.url.
-local OPENROUTER_IMAGE_HELPER = "/tmp/anki_openrouter_image.lua"
+local OPENROUTER_IMAGE_HELPER = Paths.runtime .. "/anki_openrouter_image.lua"
 
 local function ensure_openrouter_image_helper()
     local f = io.open(OPENROUTER_IMAGE_HELPER, "r")
@@ -949,6 +950,9 @@ function ImageGenerator.generate_async(config, image_prompt, phrase, on_success,
         on_error("Unknown image provider: " .. tostring(provider_name))
         return
     end
+
+    local ready, storage_err = Paths.initialize()
+    if not ready then on_error(storage_err); return end
 
     local key, finished = phrase or "", false
     pending[key] = (pending[key] or 0) + 1

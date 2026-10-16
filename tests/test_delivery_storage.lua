@@ -1,4 +1,5 @@
 -- luajit tests/test_delivery_storage.lua -- in-memory filesystem, no real notes
+package.path = "AnkiFlashcards.koplugin/?.lua;" .. package.path
 local function copy(value)
     if type(value) ~= "table" then return value end
     local out = {}; for k, v in pairs(value) do out[k] = copy(v) end; return out
@@ -9,6 +10,7 @@ package.loaded.json = {
     decode = function(token) return copy(blobs[token]) end,
 }
 package.loaded.datastorage = {getDataDir = function() return "/fake" end}
+require("storage_paths").initialize = function() return true end -- Migration tested separately.
 local Storage = dofile("AnkiFlashcards.koplugin/card_storage.lua")
 local files, failure = {}, false
 local real_open, real_rename, real_remove = io.open, os.rename, os.remove
@@ -66,7 +68,21 @@ assert(Storage.find_by_anki_id(42).definition == "UPDATED")
 assert(not Storage.save_learning_card(learning, true)) -- sent notes aren't silently overwritten
 assert(Storage.import_anki_card({kind = "learn", card_id = "learn-8765432187654321", phrase = "palabra",
     question = "palabra", answer = "Otra idea", anki_note_id = 106}))
+local R = require("anki_recovery")
+assert(Storage.save_card({phrase = "auto-pending", definition = "original"}))
+local pending = Storage.find_by_phrase("auto-pending")
+local stamp = R.stamp(pending)
+assert(Storage.update_card("auto-pending", {phrase = "auto-pending", definition = "edited while sending"}))
+assert(not Storage.record_sent_guarded(pending, stamp, {note_id = 120, deck = "Deck", model = "KOReader Vocabulary"}))
+assert(Storage.find_by_phrase("auto-pending").definition == "edited while sending")
+pending = Storage.find_by_phrase("auto-pending")
+assert(not Storage.record_sent_guarded(pending, R.stamp(pending), {}))
+assert(Storage.record_sent_guarded(pending, R.stamp(pending), {note_id = 120, deck = "Deck", model = "KOReader Vocabulary"}))
+assert(Storage.find_by_phrase("auto-pending").sent_to_anki)
+assert(not Storage.record_sent_guarded({phrase = "deleted locally"}, "old stamp", {note_id = 121}))
+assert(not Storage.find_by_phrase("deleted locally"))
 io.open, os.rename, os.remove = real_open, real_rename, real_remove
 print("PASS: individual sends persist receipts, reconcile saved notes and preserve data on failure")
 print("PASS: imports match IDs, preserve phrase conflicts and handle persistence failures")
 print("PASS: vocabulary and learning coexist; IDs, edits, receipts and imports stay isolated")
+print("PASS: background receipts preserve concurrent edits, validate note IDs and never recreate deleted cards")

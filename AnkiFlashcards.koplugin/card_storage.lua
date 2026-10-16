@@ -3,9 +3,14 @@
 
 local DataStorage = require("datastorage")
 local json        = require("json")
+local Paths       = require("storage_paths")
 
-local CARDS_FILE    = DataStorage:getDataDir() .. "/anki_flashcards.json"
-local SETTINGS_FILE = DataStorage:getDataDir() .. "/anki_flashcards_settings.json"
+local CARDS_FILE    = Paths.cards
+-- Resolve the actual plugin folder (including renamed/external installations),
+-- not a hard-coded folder beneath the KOReader data directory.
+local MODULE_DIR = debug.getinfo(1, "S").source:match("^@(.*/)") or "./"
+local SETTINGS_FILE = MODULE_DIR .. "anki_flashcards_settings.json"
+local LEGACY_SETTINGS_FILE = DataStorage:getDataDir() .. "/anki_flashcards_settings.json"
 
 local CardStorage = {}
 
@@ -51,13 +56,27 @@ local function stem(word)
 end
 
 local function load_raw()
+    local ready, err = Paths.initialize()
+    CardStorage.data_migration_error = not ready and err or nil
     local f = io.open(CARDS_FILE, "r")
+    if not f and not ready then f = io.open(Paths.legacy_cards, "r") end
     if not f then return {} end
     local content = f:read("*all")
     f:close()
     if not content or content == "" then return {} end
     local ok, data = pcall(json.decode, content)
-    if ok and type(data) == "table" then return data end
+    if ok and type(data) == "table" then
+        for _, card in ipairs(data) do
+            local relocated = Paths.resolve_image(card.image_path)
+            if relocated ~= card.image_path then
+                local R = require("anki_recovery")
+                local clean = card.anki_local_fingerprint and card.anki_local_fingerprint == R.local_fingerprint(card)
+                card.image_path = relocated
+                if clean then card.anki_local_fingerprint = R.local_fingerprint(card) end
+            end
+        end
+        return data
+    end
     return {}
 end
 
@@ -76,7 +95,15 @@ local function save_file(path, data)
 end
 
 local function save_raw(entries)
+    local ready, err = Paths.initialize()
+    if not ready then return false, err end
     return save_file(CARDS_FILE, entries)
+end
+
+function CardStorage.migrate_data()
+    local ok, err = Paths.initialize()
+    CardStorage.data_migration_error = not ok and err or nil
+    return ok, err
 end
 
 -- Save a new card. Returns true on success or false + reason string.
@@ -451,6 +478,29 @@ function CardStorage.record_sent(card, receipt)
     return true
 end
 
+-- Apply a worker receipt only to the same still-pending local snapshot.
+-- Never recreate deleted cards or overwrite edits made while it was sending.
+function CardStorage.record_sent_guarded(snapshot, expected_stamp, receipt)
+    local id = type(receipt) == "table" and receipt.note_id
+    if not ((type(id) == "number" and id > 0 and id % 1 == 0)
+        or (type(id) == "string" and id:match("^%d+$") and tonumber(id) > 0)) then
+        return false, "Anki no devolvió un ID de nota válido."
+    end
+    local R = require("anki_recovery")
+    for _, card in ipairs(load_raw()) do
+        local same = snapshot.kind == "learn" and card.kind == "learn" and card.card_id == snapshot.card_id
+            or snapshot.kind ~= "learn" and card.kind ~= "learn" and normalize(card.phrase) == normalize(snapshot.phrase)
+        if same then
+            if card.sent_to_anki and tostring(card.anki_note_id) == tostring(receipt.note_id) then return true end
+            if card.sent_to_anki or R.needs_review(card) or R.stamp(card) ~= expected_stamp then
+                return false, "La tarjeta cambió durante el envío. Usa Recuperar desde Anki."
+            end
+            return CardStorage.record_sent(card, receipt)
+        end
+    end
+    return false, "La tarjeta local ya no existe. No se ha recreado."
+end
+
 function CardStorage.mark_sent(phrase)
     local key     = normalize(phrase)
     local entries = load_raw()
@@ -470,16 +520,41 @@ function CardStorage.save_anki_settings(settings)
     return save_file(SETTINGS_FILE, settings)
 end
 
--- Load saved Anki settings. Returns a table or nil if not yet set.
-function CardStorage.load_anki_settings()
-    local f = io.open(SETTINGS_FILE, "r")
-    if not f then return nil end
+local function read_settings(path)
+    local f, err, code = io.open(path, "r")
+    if not f then
+        -- Do not treat permission/read errors as a missing local configuration.
+        return nil, err, code == 2 or (err == nil and code == nil)
+    end
     local content = f:read("*all")
-    f:close()
-    if not content or content == "" then return nil end
+    local closed = f:close()
+    if not closed or not content or content == "" then return nil, "No se pudo leer la configuración del complemento.", false end
     local ok, data = pcall(json.decode, content)
-    if ok and type(data) == "table" then return data end
-    return nil
+    if ok and type(data) == "table" then return data, nil, false end
+    return nil, "La configuración del complemento no contiene JSON válido.", false
+end
+
+-- The plugin-local file is authoritative, including when restored by ChronoSync.
+-- Migrate only if it does not exist; never merge over or replace a restored file.
+function CardStorage.load_anki_settings()
+    local data, err, missing = read_settings(SETTINGS_FILE)
+    CardStorage.settings_migration_error = nil
+    CardStorage.settings_load_error = not missing and not data and err or nil
+    if not missing then return data, err end
+    local legacy, legacy_err, legacy_missing = read_settings(LEGACY_SETTINGS_FILE)
+    if not legacy then
+        CardStorage.settings_load_error = not legacy_missing and legacy_err or nil
+        return nil, legacy_err
+    end
+    -- Rename preserves the original bytes/keys and removes the isolated file.
+    -- If this fails (read-only plugin, full filesystem, etc.), keep using the
+    -- intact old file and report that the move still needs attention.
+    local moved = os.rename(LEGACY_SETTINGS_FILE, SETTINGS_FILE)
+    if not moved then
+        CardStorage.settings_migration_error = "No se pudo mover la configuración a la carpeta del complemento. Se conserva y se usa el archivo anterior."
+        return legacy, CardStorage.settings_migration_error
+    end
+    return legacy
 end
 
 return CardStorage

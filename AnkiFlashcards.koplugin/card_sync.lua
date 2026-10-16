@@ -1,14 +1,14 @@
 -- Cloud sync for AnkiFlashcards via KOReader's SyncService (Dropbox/WebDAV).
 -- Three-way merge of anki_flashcards.json across devices.
 
-local DataStorage   = require("datastorage")
+local Paths         = require("storage_paths")
 local Notification  = require("ui/widget/notification")
 local UIManager     = require("ui/uimanager")
 local json          = require("json")
 local _             = require("gettext")
 
 
-local CARDS_FILE = DataStorage:getDataDir() .. "/anki_flashcards.json"
+local CARDS_FILE = Paths.cards
 
 local CardSync = {}
 
@@ -149,6 +149,11 @@ end
 -- ── Sync Runner ──────────────────────────────────────────────────────────
 
 function CardSync.run_sync(server, is_silent, ui)
+    local ready, err = Paths.initialize()
+    if not ready then
+        UIManager:show(Notification:new {text = err})
+        return false
+    end
     local sync_service = get_sync_service(ui)
     if not sync_service or not sync_service.sync then return false end
     if ui and sync_service == ui.cloudstorage then
