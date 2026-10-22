@@ -165,7 +165,7 @@ end
 local function has_other_normalized_phrase(entries, entry, phrase)
     local key = normalize(phrase)
     for _, other in ipairs(entries) do
-        if other ~= entry and normalize(other.phrase) == key then
+        if other ~= entry and other.kind ~= "learn" and normalize(other.phrase) == key then
             return true
         end
     end

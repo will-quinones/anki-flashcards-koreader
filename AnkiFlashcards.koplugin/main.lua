@@ -361,7 +361,8 @@ function AnkiFlashcards:init()
                     source = author
                 end
 
-                -- Capture annotation metadata before closing the selection UI.
+                -- The selection is captured first; optional highlighting
+                -- only runs after the explicit Save action succeeds.
                 ui.highlight:onClose()
 
                 local function on_generated(card)
@@ -374,23 +375,6 @@ function AnkiFlashcards:init()
                     card.highlight_pos0 = highlight_pos0
                     card.highlight_pos1 = highlight_pos1
                     Annotations.bind(card, annotation_snapshot)
-
-                    -- A generated card is local before it is displayed, so a
-                    -- dismissed viewer cannot discard the generated content.
-                    local saved, save_err = CardStorage.save_card(card)
-                    if not saved then
-                        local message = save_err == "already_saved"
-                            and _("This card is already saved")
-                            or (_("Could not save generated card: ") .. (save_err or "unknown"))
-                        UIManager:show(InfoMessage:new {text = message, timeout = 5})
-                        return
-                    end
-                    local highlighted, highlight_err = Annotations.highlight_saved(get_anki_config(), ui, card)
-                    if not highlighted then
-                        UIManager:show(Notification:new {
-                            text = highlight_err or _("La tarjeta se guardó, pero no se pudo subrayar."), timeout = 5,
-                        })
-                    end
 
                     -- Keep _audio_url so AnkiConnect can download and attach
                     -- the server-generated audio when sending to Anki.
