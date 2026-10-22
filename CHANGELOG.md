@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.3.0](https://github.com/lgallard/anki-flashcards-koreader/compare/v1.2.0...v1.3.0) (2026-10-21)
+
+
+### Features
+
+* autosave generated flashcards ([bcb4672](https://github.com/lgallard/anki-flashcards-koreader/commit/bcb467245e9bb2056216c0a30a95819d842647c4))
+* save generated flashcards automatically ([3eda5a0](https://github.com/lgallard/anki-flashcards-koreader/commit/3eda5a0352740fa7476434310306ba551e115b99))
+
+
+### Bug Fixes
+
+* complete issue 72 persistence safeguards ([606d2da](https://github.com/lgallard/anki-flashcards-koreader/commit/606d2da4e729d2a471514d3f003ee3733cb6f4de))
+* guard autosave media and duplicate phrases ([feda7c4](https://github.com/lgallard/anki-flashcards-koreader/commit/feda7c4801909601e89402576f28eeb3f45a1597))
+* guard edited card media callbacks ([20f4c16](https://github.com/lgallard/anki-flashcards-koreader/commit/20f4c16b5f65d4dd01b9dc5d52fa3a645e98724e))
+* guard inbox autosave image requests ([9cd68b9](https://github.com/lgallard/anki-flashcards-koreader/commit/9cd68b92c6c3e307ecf23e9aab103ee47d91e0ff))
+* harden autosave persistence and media callbacks ([f005065](https://github.com/lgallard/anki-flashcards-koreader/commit/f0050653732638836517afcd0c342809629d9ba9))
+* harden issue 72 async autosave ([31b6ec1](https://github.com/lgallard/anki-flashcards-koreader/commit/31b6ec1725b41fb7a290862ceb2a88e1b3e4cf6c))
+* ignore stale My Cards IPA responses ([8e375de](https://github.com/lgallard/anki-flashcards-koreader/commit/8e375defc866c62504a05da64b8db8121c295af8))
+* persist saved highlight viewer edits ([5d313cc](https://github.com/lgallard/anki-flashcards-koreader/commit/5d313cce01824d0615a9640d198ebf1128df23ff))
+* preserve card assets on failed deletion ([6de5a34](https://github.com/lgallard/anki-flashcards-koreader/commit/6de5a34e96a0cf42589d009f9b6c0fb857a94642))
+* preserve cards when clear all save fails ([bcc6790](https://github.com/lgallard/anki-flashcards-koreader/commit/bcc6790afa16721f123c143ccc3f24b596a2119a))
+* preserve referenced inbox images ([075a29d](https://github.com/lgallard/anki-flashcards-koreader/commit/075a29d267384d2391dd4bb8d05dbbcacbed3474))
+
+## [1.2.0](https://github.com/lgallard/anki-flashcards-koreader/compare/v1.1.0...v1.2.0) (2026-10-21)
+
+
+### Features
+
+* export saved cards as CSV or TSV ([1ad38a4](https://github.com/lgallard/anki-flashcards-koreader/commit/1ad38a423aecbe9d085c8943251b33b636dd106f))
+* export saved cards as CSV or TSV ([55842a7](https://github.com/lgallard/anki-flashcards-koreader/commit/55842a72a5dfb3415a2f022817c56746f030f799))
+
+
+### Bug Fixes
+
+* handle card export write failures ([3725971](https://github.com/lgallard/anki-flashcards-koreader/commit/37259714ce7ee7a80d8c2e4b7b15e81219af087d))
+* harden card exports ([f2b6f97](https://github.com/lgallard/anki-flashcards-koreader/commit/f2b6f975b97a9fbdb81e3ccb75c51aa4122dbc29))
+* separate missing-book export bucket ([e6b2cd5](https://github.com/lgallard/anki-flashcards-koreader/commit/e6b2cd5589886e7d652ca0215c0569da15ab7635))
+
+## [1.1.0](https://github.com/lgallard/anki-flashcards-koreader/compare/v1.0.0...v1.1.0) (2026-10-17)
+
+
+### Features
+
+* add text-only card mode ([ec8b155](https://github.com/lgallard/anki-flashcards-koreader/commit/ec8b15534e1c9d30afc1e8113e594fa2fad48bc8))
+* add text-only card mode ([241b241](https://github.com/lgallard/anki-flashcards-koreader/commit/241b241a467cf8d5e27a8a3068153a22a37b8dd8))
+
 ## 1.0.0 (2026-09-30)
 
 

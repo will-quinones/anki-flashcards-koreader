@@ -922,7 +922,13 @@ local PROVIDERS = {
 --- on_error(err_string) called on any failure; if nil, a Notification is shown.
 function ImageGenerator.is_enabled(config)
     local provider = config and config.image_provider
-    return type(provider) == "string" and provider ~= "" and provider ~= "none"
+    return (not config or config.images_enabled ~= false)
+        and type(provider) == "string" and provider ~= "" and provider ~= "none"
+end
+
+-- Compatibility for callers/configurations using the text-only setting.
+function ImageGenerator.images_enabled(config)
+    return ImageGenerator.is_enabled(config)
 end
 
 function ImageGenerator.generate_async(config, image_prompt, phrase, on_success, on_error)

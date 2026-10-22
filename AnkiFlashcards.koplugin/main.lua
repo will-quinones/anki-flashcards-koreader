@@ -32,6 +32,17 @@ local Annotations      = require("annotation_tools")
 local MAX_HL    = 2000
 local MAX_TITLE = 100
 
+local function copy_card(card)
+    local copy = {}
+    for key, value in pairs(card or {}) do copy[key] = value end
+    return copy
+end
+
+local function copy_card_into(target, source)
+    for key in pairs(target) do target[key] = nil end
+    for key, value in pairs(source) do target[key] = value end
+end
+
 -- Load configuration from configuration.lua; saved anki settings (from the
 -- settings UI) are merged on top at startup and at send time.
 local CONFIGURATION = nil
@@ -350,8 +361,7 @@ function AnkiFlashcards:init()
                     source = author
                 end
 
-                -- The selection is captured first; optional highlighting
-                -- only runs after the explicit Save action succeeds.
+                -- Capture annotation metadata before closing the selection UI.
                 ui.highlight:onClose()
 
                 local function on_generated(card)
@@ -364,6 +374,23 @@ function AnkiFlashcards:init()
                     card.highlight_pos0 = highlight_pos0
                     card.highlight_pos1 = highlight_pos1
                     Annotations.bind(card, annotation_snapshot)
+
+                    -- A generated card is local before it is displayed, so a
+                    -- dismissed viewer cannot discard the generated content.
+                    local saved, save_err = CardStorage.save_card(card)
+                    if not saved then
+                        local message = save_err == "already_saved"
+                            and _("This card is already saved")
+                            or (_("Could not save generated card: ") .. (save_err or "unknown"))
+                        UIManager:show(InfoMessage:new {text = message, timeout = 5})
+                        return
+                    end
+                    local highlighted, highlight_err = Annotations.highlight_saved(get_anki_config(), ui, card)
+                    if not highlighted then
+                        UIManager:show(Notification:new {
+                            text = highlight_err or _("La tarjeta se guardó, pero no se pudo subrayar."), timeout = 5,
+                        })
+                    end
 
                     -- Keep _audio_url so AnkiConnect can download and attach
                     -- the server-generated audio when sending to Anki.
@@ -414,6 +441,13 @@ function AnkiFlashcards:init()
                                 end
                             end,
 
+                            on_prepare_update = function(editing_card)
+                                return CardStorage.ensure_identity(editing_card)
+                            end,
+                            on_update = function(updated_card)
+                                return CardStorage.update_card(c, updated_card)
+                            end,
+
                             on_send = function()
                                 local ok, err = AnkiSync.send_card(get_anki_config(), c, CONFIGURATION)
                                 return ok, err
@@ -430,6 +464,16 @@ function AnkiFlashcards:init()
                                         new_card.highlight_pos0 = highlight_pos0
                                         new_card.highlight_pos1 = highlight_pos1
                                         Annotations.bind(new_card, annotation_snapshot)
+                                        local replaced, replace_err = CardStorage.replace_card(c, new_card)
+                                        if not replaced then
+                                            UIManager:show(InfoMessage:new {
+                                                text = replace_err == "already_saved"
+                                                    and _("A card with this phrase is already saved")
+                                                    or (_("Could not replace generated card: ") .. (replace_err or "unknown")),
+                                                timeout = 5,
+                                            })
+                                            return
+                                        end
                                         -- Regenerated card starts on front again.
                                         if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
                                         viewer_ref[1] = make_viewer(new_card, false)
@@ -437,8 +481,16 @@ function AnkiFlashcards:init()
                                             ImageGenerator.generate_async(
                                                 CONFIGURATION, new_card.image_prompt, new_card.phrase,
                                                 function(img_path)
+                                                    local old_image = new_card.image_path
                                                     new_card.image_path = img_path
-                                                    CardStorage.update_image_path(new_card.phrase, img_path)
+                                                    if not CardStorage.update_image_path(new_card, img_path) then
+                                                        new_card.image_path = old_image
+                                                        CardStorage.remove_image_if_unreferenced(img_path)
+                                                        UIManager:show(InfoMessage:new {
+                                                            text = _("Could not save the generated image"), timeout = 5,
+                                                        })
+                                                        return
+                                                    end
                                                     if Feedback.is_top(viewer_ref[1]) then viewer_ref[1] = viewer_ref[1]:update(new_card) end
                                                 end,
                                                 nil  -- image errors are non-fatal
@@ -452,8 +504,18 @@ function AnkiFlashcards:init()
                                 NetworkMgr:runWhenOnline(function()
                                     Feedback.run(function() return CardGenerator.generate_text(CONFIGURATION, c.phrase) end,
                                     function(new_text, new_prompt)
-                                        c.text         = new_text
-                                        c.image_prompt = new_prompt
+                                        local candidate = copy_card(c)
+                                        candidate.text = new_text
+                                        candidate.image_prompt = new_prompt
+                                        local saved, save_err = CardStorage.update_card(c, candidate)
+                                        if not saved then
+                                            UIManager:show(InfoMessage:new {
+                                                text = _("Could not save regenerated sentence: ") .. (save_err or "unknown"),
+                                                timeout = 5,
+                                            })
+                                            return
+                                        end
+                                        copy_card_into(c, candidate)
                                         if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
                                         viewer_ref[1] = make_viewer(c, true)
                                         -- Kick off image generation with new prompt.
@@ -463,8 +525,20 @@ function AnkiFlashcards:init()
                                                 new_prompt,
                                                 c.phrase,
                                                 function(img_path)
+                                                    local old_image = c.image_path
                                                     c.image_path = img_path
-                                                    CardStorage.update_image_path(c.phrase, img_path)
+                                                    local image_saved = CardStorage.update_image_path(c, img_path)
+                                                    if not image_saved then
+                                                        c.image_path = old_image
+                                                        CardStorage.remove_image_if_unreferenced(img_path)
+                                                        UIManager:show(InfoMessage:new {
+                                                            text = _("Could not save the new image"), timeout = 5,
+                                                        })
+                                                        return
+                                                    end
+                                                    if old_image and old_image ~= "" then
+                                                        CardStorage.remove_image_if_unreferenced(old_image)
+                                                    end
                                                     if Feedback.is_top(viewer_ref[1]) then
                                                         viewer_ref[1] = viewer_ref[1]:update(c)
                                                     end
@@ -494,12 +568,19 @@ function AnkiFlashcards:init()
                                     c.image_prompt,
                                     c.phrase,
                                     function(img_path)
-                                        -- Clean up old image file.
-                                        if old_image and old_image ~= "" then
-                                            os.remove(old_image)
-                                        end
                                         c.image_path = img_path
-                                        CardStorage.update_image_path(c.phrase, img_path)
+                                        local saved = CardStorage.update_image_path(c, img_path)
+                                        if not saved and c._storage_id then
+                                            CardStorage.remove_image_if_unreferenced(img_path)
+                                            c.image_path = old_image
+                                            UIManager:show(InfoMessage:new {
+                                                text = _("Could not save the new image"), timeout = 5,
+                                            })
+                                            return
+                                        end
+                                        if old_image and old_image ~= "" then
+                                            CardStorage.remove_image_if_unreferenced(old_image)
+                                        end
                                         if Feedback.is_top(viewer_ref[1]) then
                                             viewer_ref[1] = viewer_ref[1]:update(c)
                                         end
@@ -535,8 +616,16 @@ function AnkiFlashcards:init()
                             card.image_prompt,
                             card.phrase,
                             function(img_path)
+                                local old_image = card.image_path
                                 card.image_path = img_path
-                                CardStorage.update_image_path(card.phrase, img_path)
+                                if not CardStorage.update_image_path(card, img_path) then
+                                    card.image_path = old_image
+                                    CardStorage.remove_image_if_unreferenced(img_path)
+                                    UIManager:show(InfoMessage:new {
+                                        text = _("Could not save the generated image"), timeout = 5,
+                                    })
+                                    return
+                                end
                                 -- Refresh whichever side is showing.
                                 if Feedback.is_top(viewer_ref[1]) then
                                     local nv = viewer_ref[1]:update(card)
@@ -556,7 +645,7 @@ function AnkiFlashcards:init()
                             card._ankivocab_word,
                             function(audio_url)
                                 card._audio_url = audio_url
-                                CardStorage.update_audio_url(card.phrase, audio_url)
+                                CardStorage.update_audio_url(card, audio_url)
                             end,
                             nil  -- audio polling errors are non-fatal
                         )

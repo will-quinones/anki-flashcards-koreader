@@ -106,6 +106,151 @@ local function show_stats()
         onReturn = function(self) UIManager:close(self) end })
 end
 
+-- ── Card export ─────────────────────────────────────────────────────────────
+
+local MISSING_BOOK = {}
+
+local function cards_for_book(cards, book_key)
+    local filtered = {}
+    local is_missing_book = book_key == MISSING_BOOK
+    for _, card in ipairs(cards) do
+        if (is_missing_book and (not card.book_title or card.book_title == ""))
+           or (not is_missing_book and card.book_title == book_key) then
+            table.insert(filtered, card)
+        end
+    end
+    return filtered
+end
+
+local function current_book_title(opts)
+    local document = opts and opts.ui and opts.ui.document
+    if not document or not document.getProps then return nil end
+    local ok, props = pcall(document.getProps, document)
+    if not (ok and props and props.title and props.title ~= "") then return nil end
+    local title = props.title:gsub("[\r\n]+", " "):match("^%s*(.-)%s*$")
+    if #title > 100 then title = title:sub(1, 100) end
+    return title ~= "" and title or nil
+end
+
+local function show_export_format(cards)
+    local format_dialog
+    local function close_format_dialog()
+        if format_dialog then
+            UIManager:close(format_dialog)
+            format_dialog = nil
+        end
+    end
+    local function export(format)
+        local path, count, err = CardStorage.export_cards(cards, format)
+        close_format_dialog()
+        if path then
+            local count_label = count == 1 and _("1 card")
+                                or tostring(count) .. _(" cards")
+            notify(_("Exported ") .. count_label .. _(" to ") .. path)
+        elseif err == "no_cards" then
+            notify(_("No cards to export"))
+        else
+            notify_error(_("Could not export cards"))
+        end
+    end
+
+    format_dialog = ButtonDialog:new {
+        title = _("Export Cards"),
+        buttons = {
+            {{ text = _("Export as CSV"), callback = function() export("csv") end }},
+            {{ text = _("Export as TSV"), callback = function() export("tsv") end }},
+            {{ text = _("Cancel"), callback = close_format_dialog }},
+        },
+    }
+    UIManager:show(format_dialog)
+end
+
+local function show_export_scope(opts)
+    local all_cards = CardStorage.load_cards()
+    if #all_cards == 0 then
+        notify(_("No cards to export"))
+        return
+    end
+
+    local scope_dialog
+    local function close_scope_dialog()
+        if scope_dialog then
+            UIManager:close(scope_dialog)
+            scope_dialog = nil
+        end
+    end
+    local function choose_cards(cards)
+        close_scope_dialog()
+        if #cards == 0 then
+            notify(_("No cards to export"))
+            return
+        end
+        show_export_format(cards)
+    end
+
+    local buttons = {
+        {{ text = _("All Cards (") .. tostring(#all_cards) .. ")", callback = function()
+            choose_cards(all_cards)
+        end }},
+    }
+
+    local current_book = current_book_title(opts)
+    if current_book then
+        table.insert(buttons, {{ text = _("Current Book: ") .. current_book, callback = function()
+            choose_cards(cards_for_book(all_cards, current_book))
+        end }})
+    end
+
+    table.insert(buttons, {{ text = _("Choose Book"), callback = function()
+        close_scope_dialog()
+        local books, seen = {}, {}
+        for index, card in ipairs(all_cards) do
+            local book_key = (card.book_title and card.book_title ~= "")
+                             and card.book_title or MISSING_BOOK
+            if not seen[book_key] then
+                seen[book_key] = true
+                table.insert(books, {
+                    key = book_key,
+                    label = book_key == MISSING_BOOK and _("Unknown book") or book_key,
+                })
+            end
+        end
+        table.sort(books, function(left, right)
+            if left.label == right.label then
+                return left.key == MISSING_BOOK and right.key ~= MISSING_BOOK
+            end
+            return left.label < right.label
+        end)
+
+        local book_dialog
+        local book_buttons = {}
+        for _, book in ipairs(books) do
+            local selected_book = book
+            table.insert(book_buttons, {{ text = selected_book.label, callback = function()
+                UIManager:close(book_dialog)
+                choose_cards(cards_for_book(all_cards, selected_book.key))
+            end }})
+        end
+        table.insert(book_buttons, {{ text = _("Cancel"), callback = function()
+            UIManager:close(book_dialog)
+        end }})
+        book_dialog = ButtonDialog:new {
+            title = _("Export Book"),
+            buttons = book_buttons,
+        }
+        UIManager:show(book_dialog)
+    end }})
+    table.insert(buttons, {{ text = _("Cancel"), callback = function()
+        close_scope_dialog()
+    end }})
+
+    scope_dialog = ButtonDialog:new {
+        title = _("Export Cards"),
+        buttons = buttons,
+    }
+    UIManager:show(scope_dialog)
+end
+
 -- ── Management submenu ────────────────────────────────────────────────────────
 
 local function show_recovery_report(base_config, report)
@@ -293,6 +438,11 @@ function CardManager.menu_items(base_config, opts)
             end,
         },
         {
+            text = _("Exportar tarjetas"),
+            bold = true,
+            callback = function() show_export_scope(opts) end,
+        },
+        {
             text = _("Borrar tarjetas guardadas en el Kobo"),
             bold = true,
             callback = function()
@@ -424,8 +574,9 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
         local function open_viewer()
             if target and target.annotation_source then Annotations.bind(card, target.annotation_source) end
             if card.kind == "learn" then Learning.show(base_config, card, ui); return end
+            local durable_identity = CardStorage.ensure_identity(card)
             local viewer_ref = {}
-            local card_ref   = { phrase = card.phrase }
+            local card_ref   = card
             local function make_viewer(show_back)
                 local v
                 if not card.image_path or card.image_path == "" then
@@ -468,17 +619,26 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                         ui:handleEvent(Event:new(event_name, card.highlight_pos0))
                     end or nil,
                     on_update = function(updated_card)
-                        local ok, err = CardStorage.update_card(card_ref.phrase, updated_card)
+                        local ok, err = CardStorage.update_card(card_ref, updated_card)
                         if ok then card_ref.phrase = updated_card.phrase end
                         return ok, err
+                    end,
+                    on_prepare_update = function(editing_card)
+                        return CardStorage.ensure_identity(editing_card)
                     end,
                     on_regen_text = function()
                         NetworkMgr:runWhenOnline(function()
                             Feedback.run(function() return CardGenerator.generate_text(base_config, card.phrase) end,
                             function(new_text, new_prompt)
+                                local old_text, old_prompt = card.text, card.image_prompt
                                 card.text         = new_text
                                 card.image_prompt = new_prompt
-                                CardStorage.update_card(card_ref.phrase, card)
+                                local saved, save_err = CardStorage.update_card(card_ref, card)
+                                if not saved then
+                                    card.text, card.image_prompt = old_text, old_prompt
+                                    notify_error(save_err or _("Could not save regenerated text"))
+                                    return
+                                end
                                 if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
                                 viewer_ref[1] = make_viewer(true)
                                 -- Kick off image generation with new prompt.
@@ -488,8 +648,18 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                         new_prompt,
                                         card.phrase,
                                         function(img_path)
+                                            local old_image = card.image_path
                                             card.image_path = img_path
-                                            CardStorage.update_image_path(card.phrase, img_path)
+                                            local image_saved = CardStorage.update_image_path(card, img_path)
+                                            if not image_saved and card._storage_id then
+                                                card.image_path = old_image
+                                                CardStorage.remove_image_if_unreferenced(img_path)
+                                                notify_error(_("Could not save the new image"))
+                                                return
+                                            end
+                                            if old_image and old_image ~= "" then
+                                                CardStorage.remove_image_if_unreferenced(old_image)
+                                            end
                                             if Feedback.is_top(viewer_ref[1]) then
                                                 viewer_ref[1] = viewer_ref[1]:update(card)
                                             end
@@ -501,6 +671,10 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                         end)
                     end,
                     on_regen_image = ImageGenerator.is_enabled(base_config) and function()
+                        if not durable_identity then
+                            notify_error(_("Could not safely update this card's image"))
+                            return
+                        end
                         if not card.image_prompt or card.image_prompt == "" then
                             notify(_("No image prompt available"))
                             return
@@ -512,11 +686,17 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                             card.image_prompt,
                             card.phrase,
                             function(img_path)
-                                if old_image and old_image ~= "" then
-                                    os.remove(old_image)
-                                end
                                 card.image_path = img_path
-                                CardStorage.update_image_path(card.phrase, img_path)
+                                local saved = CardStorage.update_image_path(card, img_path)
+                                if not saved then
+                                    CardStorage.remove_image_if_unreferenced(img_path)
+                                    card.image_path = old_image
+                                    notify_error(_("Could not save the new image"))
+                                    return
+                                end
+                                if old_image and old_image ~= "" then
+                                    CardStorage.remove_image_if_unreferenced(old_image)
+                                end
                                 if Feedback.is_top(viewer_ref[1]) then
                                     viewer_ref[1] = viewer_ref[1]:update(card)
                                 end
@@ -534,7 +714,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                 local ipa, err = CardGenerator.generate_ipa(base_config, new_phrase)
                                 if ipa then
                                     updated_card.ipa = ipa
-                                    CardStorage.update_card(updated_card.phrase, updated_card)
+                                    CardStorage.update_card(card_ref, updated_card)
                                     local still_shown = false
                                     for w in UIManager:topdown_widgets_iter() do
                                         if w == new_viewer then still_shown = true; break end
@@ -569,14 +749,14 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                 and has_image_source
                 and not (target and target._skip_auto_image)
                 and not (ImageGenerator.is_pending and ImageGenerator.is_pending(card.phrase))
-                and NetworkMgr:isOnline() then
+                and NetworkMgr:isOnline() and durable_identity then
                 ImageGenerator.generate_async(
                     img_cfg,
                     card.image_prompt,
                     card.phrase,
                     function(img_path)
                         card.image_path = img_path
-                        CardStorage.update_image_path(card.phrase, img_path)
+                        CardStorage.update_image_path(card, img_path)
                         if Feedback.is_top(viewer_ref[1]) then
                             viewer_ref[1] = viewer_ref[1]:update(card)
                         end
@@ -613,7 +793,12 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                             text        = _("¿Eliminar solo la copia del Kobo?\n\n") .. (card.phrase or "") .. _("\n\nNo se eliminará de Anki."),
                             ok_text     = _("Eliminar del Kobo"),
                             ok_callback = function()
-                                CardStorage.delete_card(idx)
+                                if not CardStorage.ensure_identity(card) then
+                                    notify_error(_("Could not safely delete this card"))
+                                    return
+                                end
+                                local ok, err = CardStorage.delete_card_by_id(card._storage_id)
+                                if not ok then notify_error(err or _("Could not delete card")) end
                                 refresh()
                             end,
                         })

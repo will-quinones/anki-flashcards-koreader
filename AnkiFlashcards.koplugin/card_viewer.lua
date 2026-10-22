@@ -79,6 +79,7 @@ local CardViewer = InputContainer:extend {
     on_save        = nil,   -- function() -> true | nil, err
     on_send        = nil,   -- function() -> true | nil, err
     on_regenerate  = nil,   -- function()
+    on_prepare_update = nil, -- function(card) -> true | false; bind stable identity before edits
     on_update      = nil,   -- function(card) — called after a field edit (to persist)
     on_regen_ipa   = nil,   -- function(new_phrase, card, new_viewer) — async IPA regen after phrase change
     on_navigate_to_source = nil, -- function() — jump to highlight position in book
@@ -585,8 +586,15 @@ function CardViewer:editField(field_def)
                     -- Defer widget-tree changes until after the current
                     -- event cycle completes (avoids crash mid-callback).
                     UIManager:scheduleIn(0, function()
+                        local before = {}
+                        for k, v in pairs(self.card) do before[k] = v end
                         local old_phrase = self.card.phrase
-                        local old_value = self.card[field_def.key]
+                        if self.on_prepare_update and not self.on_prepare_update(self.card) then
+                            UIManager:show(InfoMessage:new {
+                                text = _("Could not save card changes"), timeout = 5,
+                            })
+                            return
+                        end
                         self.card[field_def.key] = new_val
                         if self.card.kind == "learn" then self.card.phrase = self.card.question end
                         -- When phrase changes: auto-update Cambridge source URL,
@@ -601,7 +609,8 @@ function CardViewer:editField(field_def)
                         if self.on_update then
                             local ok, err = self.on_update(self.card)
                             if ok == false then
-                                self.card[field_def.key], self.card.phrase = old_value, old_phrase
+                                for k in pairs(self.card) do self.card[k] = nil end
+                                for k, v in pairs(before) do self.card[k] = v end
                                 UIManager:show(InfoMessage:new {text = err or "No se pudieron guardar los cambios."})
                                 return
                             end
@@ -638,6 +647,7 @@ function CardViewer:update(new_card, new_show_back)
         on_send               = self.on_send,
         anki_base             = self.anki_base,
         on_regenerate         = self.on_regenerate,
+        on_prepare_update     = self.on_prepare_update,
         on_update             = self.on_update,
         on_regen_ipa          = self.on_regen_ipa,
         on_navigate_to_source = self.on_navigate_to_source,
