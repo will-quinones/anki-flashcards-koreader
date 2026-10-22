@@ -27,7 +27,8 @@ function Batch.start(ui, base, snapshots, kind, on_done, on_progress)
     if #snapshots == 0 then return nil, "No hay anotaciones seleccionadas." end
     local cfg = State.merge(base, Storage.load_anki_settings())
     local provider = cfg.text_provider or "dashscope"
-    local keys = {gemini = "gemini_api_key", openrouter = "openrouter_api_key", openai = "openai_api_key",
+    local keys = {gemini = "gemini_api_key", openrouter = "openrouter_api_key",
+        deepseek = "deepseek_api_key", openai = "openai_api_key",
         dashscope = "dashscope_api_key", ankivocab = "ankivocab_api_key"}
     if not keys[provider] then return nil, "Selecciona un servicio de texto válido en Configuración." end
     if kind == "learn" and provider == "ankivocab" then return nil, "AnkiVocab solo genera vocabulario. Elige otro servicio para Learn." end

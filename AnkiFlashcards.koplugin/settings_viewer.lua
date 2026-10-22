@@ -18,6 +18,8 @@ local PROVIDERS = {
     openrouter = {name = "OpenRouter", key = "openrouter_api_key", website = "openrouter.ai/keys",
         text_model = {key = "openrouter_model", default = "anthropic/claude-3-haiku"},
         image_model = {key = "openrouter_image_model", default = "google/gemini-3.1-flash-image-preview"}},
+    deepseek = {name = "DeepSeek", key = "deepseek_api_key", website = "platform.deepseek.com/api_keys",
+        text_model = {key = "deepseek_model", default = "deepseek-flash"}},
     dashscope = {name = "Qwen / DashScope", key = "dashscope_api_key", website = "Alibaba Cloud Model Studio",
         text_model = {key = "model", default = "qwen-plus"},
         image_model = {key = "image_model", default = "qwen-image-plus"}},
@@ -109,7 +111,7 @@ function Settings.menu_items(base, on_saved, ui)
         return PROVIDERS[id] or {name = _("Servicio no reconocido: ") .. tostring(id)}, id
     end
     local function provider_choices(category)
-        local ids = category == "text" and {"gemini", "openrouter", "dashscope", "openai", "ankivocab"}
+        local ids = category == "text" and {"gemini", "openrouter", "deepseek", "dashscope", "openai", "ankivocab"}
             or {"none", "gemini", "openrouter", "dashscope", "openai", "ankivocab", "pollinations"}
         local key = category == "text" and "text_provider" or "image_provider"
         local items = {}

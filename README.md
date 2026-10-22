@@ -438,6 +438,7 @@ que la actives explícitamente. Desvincular no borra tarjetas locales ni remotas
 |---|:---:|:---:|:---:|
 | Gemini | Sí | Sí | Sí, con modelo/cuenta compatibles |
 | OpenRouter | Sí | Sí | Sí, con modelo/cuenta compatibles |
+| DeepSeek (API directa) | Sí | Sí | No |
 | OpenAI | Sí | Sí | Sí |
 | DashScope / Qwen | Sí | Sí | Sí |
 | AnkiVocab Gateway | Sí | No | Sí |
@@ -447,6 +448,8 @@ Los proveedores de texto e imágenes son independientes, pero reutilizan la
 misma clave si eliges el mismo servicio. Cada apartado agrupa servicio y
 **Cuenta y modelo de IA**; no existe otra zona de claves/modelos duplicada.
 Las claves se ocultan en el editor y borrarlas requiere confirmación.
+DeepSeek se conecta directamente a `api.deepseek.com`; se configura como
+proveedor de texto con una clave DeepSeek y un identificador de modelo.
 `image_provider =
 "none"`, vacío o ausente omite imágenes sin error. No se presupone que una API
 sea gratuita: consulta precios, cuotas y modelos vigentes en tu cuenta.

@@ -6,6 +6,7 @@
 --   gemini               — Google Gemini Flash
 --   openrouter           — OpenRouter gateway (any model)
 --   openai               — OpenAI (GPT-4o-mini, GPT-4o, etc.)
+--   deepseek             — DeepSeek API (OpenAI-compatible)
 --   ankivocab            — AnkiVocab Gateway (server-side generation)
 
 local https  = require("ssl.https")
@@ -31,7 +32,8 @@ local GEMINI_BASE_URL =
 -- Returns (text, nil) or (nil, error_string).
 local function call_llm(config, prompt)
     local provider = config.text_provider or "dashscope"
-    if provider ~= "gemini" and provider ~= "openai" and provider ~= "openrouter" and provider ~= "dashscope" then
+    if provider ~= "gemini" and provider ~= "openai" and provider ~= "openrouter"
+       and provider ~= "deepseek" and provider ~= "dashscope" then
         return nil, "Servicio de texto no reconocido. Selecciónalo en Configuración → Generación de tarjetas."
     end
     local response_body = {}
@@ -82,6 +84,10 @@ local function call_llm(config, prompt)
             api_key  = config.openrouter_api_key or ""
             endpoint = "https://openrouter.ai/api/v1/chat/completions"
             model    = config.openrouter_model or "anthropic/claude-3-haiku"
+        elseif provider == "deepseek" then
+            api_key  = config.deepseek_api_key or ""
+            endpoint = "https://api.deepseek.com/chat/completions"
+            model    = config.deepseek_model or "deepseek-flash"
         else
             api_key  = config.dashscope_api_key or config.api_key or ""
             endpoint = config.provider or ""
@@ -317,7 +323,7 @@ end
 -- the actual book text. No image/TTS requests or vocabulary transformations.
 function CardGenerator.generate_learning(config, source)
     if config.text_provider == "ankivocab" then
-        return nil, "Anki Learn necesita Gemini, OpenRouter, OpenAI o DashScope. AnkiVocab solo genera vocabulario."
+        return nil, "Anki Learn necesita Gemini, OpenRouter, OpenAI, DeepSeek o DashScope. AnkiVocab solo genera vocabulario."
     end
     local payload = json.encode({selected_text = source.selected, surrounding_text = source.context,
         book = source.title, author = source.author, chapter = source.chapter,

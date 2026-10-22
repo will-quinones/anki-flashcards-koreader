@@ -5,6 +5,10 @@ local CONFIGURATION = {
     text_provider = "dashscope",
     dashscope_api_key = "YOUR_DASHSCOPE_API_KEY",
     model = "qwen-plus", -- AI model, NOT an Anki note type.
+    -- For direct DeepSeek text generation, use:
+    -- text_provider = "deepseek",
+    -- deepseek_api_key = "YOUR_DEEPSEEK_API_KEY",
+    -- deepseek_model = "deepseek-flash",
     target_language = "English", -- The book/card language; e.g. "Spanish".
 
     -- Vocabulary extras are optional. Learn always uses text and source quotes.

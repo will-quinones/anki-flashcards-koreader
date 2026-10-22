@@ -68,6 +68,8 @@ do
             "openrouter_api_key",
             "openrouter_model",
             "openrouter_image_model",
+            "deepseek_api_key",
+            "deepseek_model",
             "elevenlabs_api_key",
             "ankivocab_api_key",
         }) do

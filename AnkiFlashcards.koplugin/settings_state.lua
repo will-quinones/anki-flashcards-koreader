@@ -1,7 +1,8 @@
 -- Shared configuration rules. No UI dependencies or network requests.
 local State = {}
 local OPTIONAL_VALUES = {"model", "image_model", "gemini_text_model", "gemini_image_model", "openai_model",
-    "openai_image_model", "openrouter_model", "openrouter_image_model", "text_provider", "target_language",
+    "openai_image_model", "openrouter_model", "openrouter_image_model", "deepseek_model",
+    "text_provider", "target_language",
     "deck", "book_parent", "vocab_deck_name", "learn_deck_name", "elevenlabs_voice_id"}
 local function clear_blanks(values)
     for _, key in ipairs(OPTIONAL_VALUES) do
