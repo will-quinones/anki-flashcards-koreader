@@ -116,6 +116,11 @@ La configuración usa el **menú nativo de KOReader**, no un segundo panel.
 Los editores de texto/claves y los avisos usan los diálogos estándar. No se
 modifica el menú del firmware original Kobo/Nickel.
 
+En **Estadísticas por libro**, mantén pulsado un libro para **Borrar tarjetas de
+este libro…**. La confirmación muestra cuántas tarjetas Vocab/Learn se borrarán
+del Kobo. Se conservan las notas enviadas a Anki, los subrayados y las imágenes
+que todavía usan otras tarjetas. Las estadísticas se actualizan tras el borrado.
+
 Al tocar un subrayado existente que normalmente abriría la barra compacta de
 edición, se abre directamente el menú completo de acciones, también en los subrayados
 morados y sin consultar la IA ni modificar las notas personales, sin pasar por

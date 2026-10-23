@@ -1,4 +1,4 @@
--- Card Manager: card list (with filter) + separate management submenu.
+-- Card lists, native statistics, exports and explicit card actions.
 
 local ButtonDialog   = require("ui/widget/buttondialog")
 local ConfirmBox     = require("ui/widget/confirmbox")
@@ -62,53 +62,6 @@ local function send_one(anki_config, card, tts_config, quiet)
     end
 end
 
-local function show_stats()
-    local all_cards  = CardStorage.load_cards()
-    local book_order = {}
-    local book_stats = {}
-    for _i, card in ipairs(all_cards) do
-        local title = (card.book_title and card.book_title ~= "")
-                      and card.book_title or _("Libro no identificado")
-        if not book_stats[title] then
-            book_stats[title] = { total = 0, sent = 0, review = 0 }
-            table.insert(book_order, title)
-        end
-        book_stats[title].total = book_stats[title].total + 1
-        if Recovery.needs_review(card) then book_stats[title].review = book_stats[title].review + 1
-        elseif card.sent_to_anki then book_stats[title].sent = book_stats[title].sent + 1 end
-    end
-
-    local total_all, sent_all, review_all = #all_cards, 0, 0
-    for _i, card in ipairs(all_cards) do
-        if Recovery.needs_review(card) then review_all = review_all + 1
-        elseif card.sent_to_anki then sent_all = sent_all + 1 end
-    end
-
-    local stat_items = {}
-    if #book_order == 0 then
-        table.insert(stat_items, { text = _("Todavía no hay tarjetas") })
-    end
-    for _i, title in ipairs(book_order) do
-        local s      = book_stats[title]
-        local unsent = s.total - s.sent - s.review
-        local line   = title .. "  —  " .. tostring(s.total)
-                       .. (s.total == 1 and _(" tarjeta · ") or _(" tarjetas · ")) .. tostring(s.sent) .. _(" enviadas")
-        if unsent > 0 then
-            line = line .. " · " .. tostring(unsent) .. _(" pendientes")
-        end
-        if s.review > 0 then line = line .. " · " .. s.review .. _(" por revisar") end
-        table.insert(stat_items, { text = line })
-    end
-
-    local title_str = _("Estadísticas — ") .. tostring(total_all) .. (total_all == 1 and _(" tarjeta") or _(" tarjetas"))
-    table.insert(stat_items, 1, {text = sent_all .. _(" enviadas · ") .. (total_all - sent_all - review_all)
-        .. _(" pendientes · ") .. review_all .. _(" por revisar")})
-    UIManager:show(Menu:new { title = title_str, item_table = stat_items, is_borderless = true,
-        onReturn = function(self) UIManager:close(self) end })
-end
-
--- ── Card export ─────────────────────────────────────────────────────────────
-
 local MISSING_BOOK = {}
 
 local function cards_for_book(cards, book_key)
@@ -122,6 +75,112 @@ local function cards_for_book(cards, book_key)
     end
     return filtered
 end
+
+local function show_stats()
+    local all_cards = CardStorage.load_cards()
+    local book_order, book_stats = {}, {}
+    local total_all, sent_all, review_all = #all_cards, 0, 0
+    for _i, card in ipairs(all_cards) do
+        local book_key = (card.book_title and card.book_title ~= "") and card.book_title or MISSING_BOOK
+        if not book_stats[book_key] then
+            book_stats[book_key] = {
+                total = 0, sent = 0, review = 0,
+                label = book_key == MISSING_BOOK and _("Libro no identificado") or book_key,
+            }
+            table.insert(book_order, book_key)
+        end
+        local stats = book_stats[book_key]
+        stats.total = stats.total + 1
+        if Recovery.needs_review(card) then
+            stats.review, review_all = stats.review + 1, review_all + 1
+        elseif card.sent_to_anki then
+            stats.sent, sent_all = stats.sent + 1, sent_all + 1
+        end
+    end
+
+    local stats_menu
+    local function refresh_stats()
+        if stats_menu then UIManager:close(stats_menu) end
+        show_stats()
+    end
+    local function delete_book(book_key, label)
+        local current_cards = cards_for_book(CardStorage.load_cards(), book_key)
+        if #current_cards == 0 then
+            notify(_("Este libro ya no tiene tarjetas guardadas en el Kobo."))
+            refresh_stats()
+            return
+        end
+        UIManager:show(ConfirmBox:new {
+            text = _("¿Borrar ") .. tostring(#current_cards)
+                .. (#current_cards == 1 and _(" tarjeta de «") or _(" tarjetas de «"))
+                .. label .. _("» del Kobo? Esta acción no se puede deshacer. Se conservarán las notas de Anki y los subrayados del libro."),
+            ok_text = _("Borrar del Kobo"),
+            cancel_callback = function() end,
+            ok_callback = function()
+                local book_title
+                if book_key ~= MISSING_BOOK then book_title = book_key end
+                local deleted, count_or_err = CardStorage.delete_cards_for_book(book_title, book_key == MISSING_BOOK)
+                if not deleted then
+                    notify_error(_("No se pudieron borrar las tarjetas del libro. No se guardaron los cambios."))
+                    return
+                end
+                if count_or_err == 0 then
+                    notify(_("Este libro ya no tiene tarjetas guardadas en el Kobo."))
+                else
+                    notify((count_or_err == 1 and _("Se borró 1 tarjeta del Kobo para «")
+                        or _("Se borraron ") .. tostring(count_or_err) .. _(" tarjetas del Kobo para «"))
+                        .. label .. _("»."))
+                end
+                refresh_stats()
+            end,
+        })
+    end
+
+    local stat_items = {{ text = sent_all .. _(" enviadas · ") .. (total_all - sent_all - review_all)
+        .. _(" pendientes · ") .. review_all .. _(" por revisar") }}
+    if #book_order == 0 then
+        table.insert(stat_items, { text = _("Todavía no hay tarjetas") })
+    end
+    for _i, book_key in ipairs(book_order) do
+        local stats = book_stats[book_key]
+        local unsent = stats.total - stats.sent - stats.review
+        local line = stats.label .. "  —  " .. tostring(stats.total)
+            .. (stats.total == 1 and _(" tarjeta · ") or _(" tarjetas · ")) .. tostring(stats.sent) .. _(" enviadas")
+        if unsent > 0 then line = line .. " · " .. tostring(unsent) .. _(" pendientes") end
+        if stats.review > 0 then line = line .. " · " .. stats.review .. _(" por revisar") end
+        local selected_key, selected_label = book_key, stats.label
+        table.insert(stat_items, {
+            text = line,
+            hold_callback = function()
+                local actions
+                actions = ButtonDialog:new {
+                    title = selected_label,
+                    buttons = {
+                        {{ text = _("Borrar tarjetas de este libro…"), callback = function()
+                            UIManager:close(actions)
+                            delete_book(selected_key, selected_label)
+                        end }},
+                        {{ text = _("Cancelar"), callback = function() UIManager:close(actions) end }},
+                    },
+                }
+                UIManager:show(actions)
+            end,
+        })
+    end
+
+    stats_menu = Menu:new {
+        title = _("Estadísticas — ") .. tostring(total_all) .. (total_all == 1 and _(" tarjeta") or _(" tarjetas")),
+        item_table = stat_items,
+        is_borderless = true,
+        onReturn = function(self) UIManager:close(self) end,
+        onMenuHold = function(_, item)
+            if item and item.hold_callback then item.hold_callback() end
+        end,
+    }
+    UIManager:show(stats_menu)
+end
+
+-- ── Card export ─────────────────────────────────────────────────────────────
 
 local function current_book_title(opts)
     local document = opts and opts.ui and opts.ui.document

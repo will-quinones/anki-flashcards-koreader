@@ -1,5 +1,20 @@
 # Cambios locales
 
+## Actualización selectiva desde upstream (2026-10-23)
+
+Revisado upstream hasta `e452539`, incorporando la función de `ff68843` para
+borrar tarjetas por libro. Está adaptada al menú nativo Estadísticas por libro:
+mantener pulsado un libro abre la acción y la confirmación indica cuántas
+tarjetas se borrarán del Kobo. Incluye Vocab y Learn; conserva notas en Anki,
+subrayados, imágenes compartidas y metadatos de las tarjetas restantes. Un fallo
+de escritura conserva los registros y sus imágenes. Se mantienen los recuentos
+de enviadas, pendientes y por revisar, y se actualizan después del borrado.
+
+No se importan los metadatos de la versión 1.4.0 del autor ni se restauran los
+menús retirados. UPSTREAM.md registra las decisiones para próximas revisiones.
+Verificación completa: 54/54 pruebas, ninguna omitida y sintaxis de 36 módulos
+Lua correcta. La comprobación visual en el Kobo sigue pendiente.
+
 ## Limpieza del flujo de lectura tras las integraciones (2026-10-23)
 
 Retirados la consulta automática por color morado, su popup, caché y generador

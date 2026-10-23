@@ -25,6 +25,27 @@ y adapta su comportamiento a esta variante:
 | Consulta automática por subrayado morado | Retirar: los colores comparten el menú nativo y preservan las notas personales. |
 | Configuración y contexto duplicados | Centralizar la configuración y mantener un extractor de contexto local al módulo. |
 
+## Última revisión: 2026-10-23
+
+Revisado el original hasta `e452539f7d29ad551bbef2c7128a86b4ff0e4a1c`.
+Las únicas novedades desde la base anterior son:
+
+| Commit original | Decisión del fork |
+| --- | --- |
+| `ff68843` — borrado por libro | Incorporar la persistencia y adaptar la acción a Estadísticas por libro. Pulsación larga y confirmación en español; borra Vocab/Learn solo del Kobo, preserva imágenes compartidas, notas de Anki y subrayados. |
+| `3ecba2e` — integración de esa función | Revisado; no aporta cambios adicionales a la función adaptada. |
+| `8c0038e` — versión 1.4.0 | No importar metadatos de versión, manifiesto ni changelog como publicación propia. |
+| `e452539` — integración de la versión | Revisado; no aporta código funcional adicional. |
+
+La adaptación conserva el menú nativo, su navegación de vuelta y el recuento
+separado de tarjetas enviadas, pendientes y por revisar. No incorpora el antiguo
+panel de gestión ni el guardado automático. La batería completa pasa: 54 pruebas,
+sin omisiones, más la comprobación de sintaxis de los 36 módulos Lua.
+
+Al adoptar cambios parcialmente, los commits originales pueden seguir apareciendo
+en `git log HEAD..upstream/main`: eso no indica que falte revisar su contenido.
+La siguiente comparación de novedades parte de la revisión registrada arriba.
+
 ## Procedimiento de actualización
 
 1. Consultar las novedades con `git fetch upstream`.
