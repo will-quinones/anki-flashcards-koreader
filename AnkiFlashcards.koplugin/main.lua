@@ -25,7 +25,6 @@ local SettingsViewer   = require("settings_viewer")
 local SettingsState    = require("settings_state")
 local Learning         = require("learning")
 local Feedback         = require("generation_feedback")
-local Recovery         = require("anki_recovery")
 local HighlightMenu    = require("highlight_menu")
 local Annotations      = require("annotation_tools")
 local VocabGeneration  = require("vocab_generation")
@@ -46,60 +45,14 @@ local function copy_card_into(target, source)
     for key, value in pairs(source) do target[key] = value end
 end
 
--- Load configuration from configuration.lua; saved anki settings (from the
--- settings UI) are merged on top at startup and at send time.
-local CONFIGURATION = nil
+-- Configuration has one normalization/migration path shared with the UI.
+-- The optional private file is never required unconditionally.
+local CONFIGURATION
 do
-    local ok, conf = pcall(require, "configuration")
-    if ok then CONFIGURATION = conf end
-    CONFIGURATION = CONFIGURATION or {}
-    local saved_anki = CardStorage.load_anki_settings()
-    if saved_anki then
-        CONFIGURATION = CONFIGURATION or {}
-        -- Old files used `model` for a note type and later `anki_model` to
-        -- disambiguate it. New files use settings_version and automatic types.
-        -- Read legacy aliases only to avoid mistaking an old note name for
-        -- an AI model; never infer old note names from a hard-coded allowlist.
-        if not saved_anki.settings_version and not saved_anki.anki_model and saved_anki.model and saved_anki.model ~= "" then
-            saved_anki.anki_model = saved_anki.model
-            saved_anki.model = nil
-        end
-        CONFIGURATION.anki = saved_anki
-        -- Promote plugin-level settings from saved anki settings to top level.
-        for _, key in ipairs({
-            "target_language",
-            "text_provider",
-            "image_provider",
-            "model",
-            "image_model",
-            "gemini_text_model",
-            "gemini_image_model",
-            "openai_model",
-            "openai_image_model",
-            "dashscope_api_key",
-            "gemini_api_key",
-            "openai_api_key",
-            "openrouter_api_key",
-            "openrouter_model",
-            "openrouter_image_model",
-            "deepseek_api_key",
-            "deepseek_model",
-            "elevenlabs_api_key",
-            "ankivocab_api_key",
-        }) do
-            if (key == "image_provider" or key:match("_api_key$")) and saved_anki[key] ~= nil then
-                -- An explicitly cleared image provider must override the file.
-                CONFIGURATION[key] = saved_anki[key]
-            elseif saved_anki[key] and saved_anki[key] ~= "" then
-                CONFIGURATION[key] = saved_anki[key]
-            end
-        end
-    end
+    local ok, config = pcall(require, "configuration")
+    CONFIGURATION = ok and type(config) == "table" and config or {}
+    SettingsState.apply(CONFIGURATION, SettingsState.merge(CONFIGURATION, CardStorage.load_anki_settings()))
 end
-
--- Apply the same normalization used by the settings UI to generation/send
--- paths too; an empty displayed model must really use the provider default.
-SettingsState.apply(CONFIGURATION, SettingsState.merge(CONFIGURATION, CardStorage.load_anki_settings()))
 
 local AnkiFlashcards = InputContainer:new {
     name        = "ankiflashcards",
@@ -186,124 +139,6 @@ local function can_generate_image(card, img_cfg)
     return has_prompt or is_ankivocab_card
 end
 
--- ── Quick Lookup cache + popup (purple highlights) ──────────────────────────
-local quick_lookup_cache = {}
-
-local PTF_BOLD_ON  = "\xEF\xBF\xB2"
-local PTF_BOLD_OFF = "\xEF\xBF\xB3"
-
-local function show_quick_lookup_popup(phrase, lookup, on_delete)
-    local Blitbuffer      = require("ffi/blitbuffer")
-    local ButtonTable     = require("ui/widget/buttontable")
-    local CenterContainer = require("ui/widget/container/centercontainer")
-    local Font            = require("ui/font")
-    local FrameContainer  = require("ui/widget/container/framecontainer")
-    local Geom            = require("ui/geometry")
-    local GestureRange    = require("ui/gesturerange")
-    local InputContainer  = require("ui/widget/container/inputcontainer")
-    local Size            = require("ui/size")
-    local TextBoxWidget   = require("ui/widget/textboxwidget")
-    local VerticalGroup   = require("ui/widget/verticalgroup")
-    local VerticalSpan    = require("ui/widget/verticalspan")
-
-    local screen_w = Device.screen:getWidth()
-    local screen_h = Device.screen:getHeight()
-    local popup_w  = math.floor(screen_w * 0.82)
-    local pad      = Size.padding.large
-
-    local COLOR_BLUE = Blitbuffer.ColorRGB32(0x00, 0x3A, 0x75, 0xFF)
-    local COLOR_RED  = Blitbuffer.ColorRGB32(0xBB, 0x00, 0x00, 0xFF)
-
-    local inner_w = popup_w - pad * 2
-
-    local phrase_w = TextBoxWidget:new {
-        text      = capitalize_first(phrase),
-        face      = Font:getFace("cfont", 24),
-        fgcolor   = COLOR_BLUE,
-        width     = inner_w,
-        alignment = "center",
-        bold      = true,
-    }
-    local ipa_w = TextBoxWidget:new {
-        text      = lookup.ipa or "",
-        face      = Font:getFace("cfont", 20),
-        fgcolor   = COLOR_RED,
-        width     = inner_w,
-        alignment = "center",
-    }
-    local def_w = TextBoxWidget:new {
-        text      = lookup.definition or "",
-        face      = Font:getFace("cfont", 20),
-        width     = inner_w,
-        alignment = "center",
-    }
-
-    local content = VerticalGroup:new {
-        align = "center",
-        phrase_w,
-        VerticalSpan:new { width = Size.padding.default },
-        ipa_w,
-        VerticalSpan:new { width = Size.padding.default },
-        def_w,
-    }
-
-    -- Add a "Delete Highlight" button if a delete callback is provided.
-    -- popup_ref is set after the popup widget is created (below).
-    local popup_ref = {}
-    if on_delete then
-        local btn_table = ButtonTable:new {
-            width = inner_w,
-            buttons = {{
-                {
-                    text     = _("Delete Highlight"),
-                    callback = function()
-                        if popup_ref[1] then UIManager:close(popup_ref[1]) end
-                        on_delete()
-                    end,
-                },
-            }},
-            zero_sep = true,
-        }
-        content[#content + 1] = VerticalSpan:new { width = Size.padding.large }
-        content[#content + 1] = btn_table
-    end
-
-    local frame = FrameContainer:new {
-        background   = Blitbuffer.COLOR_WHITE,
-        bordersize   = Size.border.window,
-        radius       = Size.radius.window,
-        padding      = pad,
-        content,
-    }
-
-    local popup
-    popup = InputContainer:new {
-        ges_events = {
-            TapClose = {
-                GestureRange:new {
-                    ges   = "tap",
-                    range = Geom:new { x = 0, y = 0, w = screen_w, h = screen_h },
-                },
-            },
-        },
-        CenterContainer:new {
-            dimen = Geom:new { w = screen_w, h = screen_h },
-            frame,
-        },
-    }
-    function popup:onTapClose()
-        UIManager:close(self)
-        return true
-    end
-    function popup:onAnyKeyPressed()
-        UIManager:close(self)
-        return true
-    end
-
-    popup_ref[1] = popup
-    UIManager:show(popup)
-end
-
 function AnkiFlashcards:init()
     self.ui.menu:registerToMainMenu(self)
     if CardStorage.migrate_data then CardStorage.migrate_data() end
@@ -316,7 +151,7 @@ function AnkiFlashcards:init()
     -- Settings and saved cards are also accessible from the file browser.
     if not self.ui.highlight then return end
 
-    -- ── Entry 4: Anki Card (primary action, registered last = bottom) ───────────
+    -- ── Anki Vocab (keep the existing registration ID for saved layouts) ──────
     local function card_button(rhi)
         return {
             text    = _("Anki Vocab"),
@@ -720,110 +555,10 @@ function AnkiFlashcards:init()
         })
     end
 
-    -- ── Tap-to-Show Flashcard ─────────────────────────────────────────────────
-    -- Saved cards never intercept a highlight tap: keep the usual action menu.
-    local highlight_module = self.ui.highlight
-    HighlightMenu.install(highlight_module)
-    local orig_onTap = highlight_module.onTap
-    local plugin_self = self
-
-    highlight_module.onTap = function(hl_self, arg, ges)
-        -- Pass through if mid-hold or no gesture
-        if hl_self.hold_pos or not ges then
-            return orig_onTap(hl_self, arg, ges)
-        end
-        local visible = hl_self.view and hl_self.view.highlight
-                        and hl_self.view.highlight.visible_boxes
-        if not visible or #visible == 0 then
-            return orig_onTap(hl_self, arg, ges)
-        end
-        local pos = hl_self.view:screenToPageTransform(ges.pos)
-        if not pos then
-            return orig_onTap(hl_self, arg, ges)
-        end
-
-        -- Find tapped highlight and check for a saved card
-        for _i, box in ipairs(visible) do
-            local r = box.rect
-            if r and pos.x >= r.x and pos.y >= r.y
-               and pos.x <= r.x + r.w and pos.y <= r.y + r.h then
-                local ann = hl_self.ui.annotation.annotations[box.index]
-                if ann then
-                    local snapshot = Annotations.capture(self.ui, ann)
-                    local cards = CardStorage.load_cards()
-                    local vocab = Annotations.find_card(snapshot, "vocab", cards, true)
-                    local learn = Annotations.find_card(snapshot, "learn", cards, true)
-                    if vocab or learn then
-                        hl_self.selected_text = require("util").tableDeepCopy(ann)
-                        hl_self:onShowHighlightMenu(box.index)
-                        return true
-                    end
-                    -- ── Quick Lookup for purple highlights ───────────────
-                    if ann.color == "purple" and ann.text and ann.text ~= "" then
-                        local phrase_text = ann.text
-                        local ann_ref     = ann
-                        local ui_ref      = hl_self.ui
-                        local hl_idx      = box.index
-
-                        -- Delete callback: removes the highlight via KOReader's API.
-                        local function delete_highlight()
-                            hl_self:deleteHighlight(hl_idx)
-                        end
-
-                        -- Check annotation note for a previously saved lookup.
-                        if ann_ref.note and ann_ref.note:match("^%[IPA%]") then
-                            local ipa = ann_ref.note:match("%[IPA%] (.-) | ")
-                            local def = ann_ref.note:match("| (.+)$")
-                            if ipa and def then
-                                show_quick_lookup_popup(phrase_text, { ipa = ipa, definition = def }, delete_highlight)
-                                return true
-                            end
-                        end
-
-                        -- Check session cache.
-                        if quick_lookup_cache[phrase_text] then
-                            show_quick_lookup_popup(phrase_text, quick_lookup_cache[phrase_text], delete_highlight)
-                            return true
-                        end
-
-                        if not NetworkMgr:isOnline() then
-                            -- Offline: fall through to normal highlight menu.
-                            break
-                        end
-                        local loading = Notification:new {
-                            text    = _("Consultando…"),
-                            timeout = 15,
-                        }
-                        UIManager:show(loading)
-                        UIManager:scheduleIn(0.05, function()
-                            UIManager:close(loading)
-                            local result, err = CardGenerator.generate_quick_lookup(
-                                CONFIGURATION, phrase_text
-                            )
-                            if result then
-                                quick_lookup_cache[phrase_text] = result
-                                -- Persist to annotation note for offline access.
-                                ann_ref.note = "[IPA] " .. (result.ipa or "")
-                                            .. " | " .. (result.definition or "")
-                                local Event = require("ui/event")
-                                ui_ref:handleEvent(Event:new("AnnotationsModified",
-                                    { ann_ref, nb_highlights_added = 0, nb_notes_added = 1 }))
-                                show_quick_lookup_popup(phrase_text, result, delete_highlight)
-                            else
-                                UIManager:show(InfoMessage:new {
-                                    text    = Feedback.classify(err).message,
-                                    timeout = 3,
-                                })
-                            end
-                        end)
-                        return true
-                    end
-                end
-                break  -- only check first hit; fall through to original
-            end
-        end
-        return orig_onTap(hl_self, arg, ges)
-    end
+    -- All highlight colors and saved-card states use the same native menu.
+    -- The helper only redirects the native compact toolbar during a tap;
+    -- editing boundaries retains KOReader's own dialog and selection handling.
+    HighlightMenu.install(self.ui.highlight)
 
     -- HTTP/DNS is isolated in a cancellable low-priority process, not a UI tick.
     if self._auto_send then self._auto_send:stop() end

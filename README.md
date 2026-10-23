@@ -117,7 +117,8 @@ Los editores de texto/claves y los avisos usan los diálogos estándar. No se
 modifica el menú del firmware original Kobo/Nickel.
 
 Al tocar un subrayado existente que normalmente abriría la barra compacta de
-edición, se abre directamente el menú completo de acciones, sin pasar por
+edición, se abre directamente el menú completo de acciones, también en los subrayados
+morados y sin consultar la IA ni modificar las notas personales, sin pasar por
 los tres puntos. **Editar subrayado** conserva la barra original de estilo,
 color, notas y ajuste de límites. No se modifica el código de KOReader ni se
 recrean los subrayados. Tener una tarjeta Vocab/Learn guardada no abre su modal

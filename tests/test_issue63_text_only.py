@@ -241,7 +241,7 @@ package.preload["card_storage"] = function()
     }
 end
 package.preload["anki_sync"] = function() return { send_card = function() return true end } end
-package.preload["card_manager"] = function() return { show = function() end, show_manage = function() end } end
+package.preload["card_manager"] = function() return { show = function() end } end
 package.preload["card_sync"] = function() return { run_sync = function() end } end
 package.preload["highlight_inbox"] = function() return { show = function() end } end
 package.preload["audio_generator"] = function() return { poll_ankivocab_async = function() end } end

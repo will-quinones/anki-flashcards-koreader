@@ -1,5 +1,19 @@
 # Cambios locales
 
+## Limpieza del flujo de lectura tras las integraciones (2026-10-23)
+
+Retirados la consulta automática por color morado, su popup, caché y generador
+sin llamadas restantes. Todos los subrayados pasan por el mismo menú nativo,
+sin consultar tarjetas o IA ni sobrescribir notas al tocarlos. Se mantienen
+Anki Vocab/Anki Learn como acciones explícitas y Editar subrayado para la barra
+nativa. Los tests comprueban colores y tarjetas guardadas/no guardadas.
+
+La configuración inicial usa exclusivamente settings_state.lua, conservando
+la migración de tipos de nota antiguos sin mutar los ajustes leídos. Se elimina
+el extractor de contexto alternativo sin uso y sus funciones globales. AGENTS.md
+y CLAUDE.md describen las decisiones actuales; el workflow Fork tests ejecuta
+la batería completa en cada cambio. No se reinstalan los menús retirados.
+
 ## Fork propio y mantenimiento (2026-10-23)
 
 Esta variante se publica en https://github.com/will-quinones/anki-flashcards-koreader,

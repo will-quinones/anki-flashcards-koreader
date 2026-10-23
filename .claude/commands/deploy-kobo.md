@@ -37,14 +37,14 @@ You MUST perform the following steps:
 - If mount not found, inform user: "Kobo not detected. Connect via USB or use --ssh"
 - Target: `<MOUNT>/.adds/koreader/plugins/AnkiFlashcards.koplugin/`
 - Verify the `.adds/koreader/plugins/` directory exists on the device
-- Copy using `rsync -av --exclude='configuration.lua'` from `AnkiFlashcards.koplugin/` to target
+- Copy using `rsync -av --exclude='configuration.lua' --exclude='anki_flashcards_settings.json*'` from `AnkiFlashcards.koplugin/` to target
 - Show files copied and total size
 
 ### 4. Deploy via SSH (--ssh flag)
 
 - Target: `root@<IP>:/mnt/onboard/.adds/koreader/plugins/AnkiFlashcards.koplugin/`
-- Use `rsync -avz --exclude='configuration.lua' -e ssh` for efficient transfer
-- If rsync not available over SSH, fall back to `scp -r` (excluding config manually)
+- Use `rsync -avz --exclude='configuration.lua' --exclude='anki_flashcards_settings.json*' -e ssh` for efficient transfer
+- If rsync not available over SSH, fall back to `scp -r` (excluding configuration.lua and anki_flashcards_settings.json* manually)
 - Show files transferred
 
 ### 5. Post-deploy

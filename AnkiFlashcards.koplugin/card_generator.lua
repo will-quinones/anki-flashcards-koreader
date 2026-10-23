@@ -475,23 +475,4 @@ function CardGenerator.generate_ipa(config, phrase)
     return raw_text:match("^%s*(.-)%s*$")  -- trim whitespace
 end
 
--- Quick lookup: pronunciation + short definition only (for purple highlight tap).
--- Returns ({ipa, definition}, nil) or (nil, error_string).
-function CardGenerator.generate_quick_lookup(config, phrase)
-    local lang = config.target_language or "English"
-    local p = escape_for_prompt(phrase or "")
-    local prompt = 'You are a ' .. lang .. ' dictionary. Return ONLY valid JSON for: "' .. p .. '"\n'
-                .. '{"ipa": "<pronunciation notation — IPA for European languages, '
-                .. 'pinyin for Mandarin, romaji for Japanese, or standard for ' .. lang .. '>", '
-                .. '"definition": "<simple, clear definition in everyday ' .. lang .. ', max 15 words>"}'
-
-    local raw_text, err, details = call_llm(config, prompt)
-    if not raw_text then return nil, err, details end
-    local result = parse_response(raw_text)
-    if result and result.ipa and result.definition then
-        return result
-    end
-    return nil, "Unexpected API response"
-end
-
 return CardGenerator

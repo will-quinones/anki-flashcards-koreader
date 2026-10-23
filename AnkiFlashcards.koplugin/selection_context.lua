@@ -44,68 +44,15 @@ local function get_page_text(document)
   return ""
 end
 
-function get_selection_in_context2(document, selection, window)
-    window = window or 5 -- number of words before/after
-    local page_text = get_page_text(document)
-    if not page_text or not selection or selection == "" then
-        return ""
-    end
-
-    -- escape any magic characters from selection for pattern search
-    local safe_selection = selection:gsub("([^%w%s])", "%%%1")
-
-    -- find the selection inside the page text
-    local start_pos, end_pos = page_text:find(safe_selection)
-    if not start_pos then
-        return '"' .. selection .. '"' -- fallback if not found
-    end
-
-    -- split text into words
-    local words = {}
-    for w in page_text:gmatch("%S+") do
-        table.insert(words, w)
-    end
-
-    -- find the index of the selected text among words
-    local selection_index
-    for i, w in ipairs(words) do
-        if w:find(safe_selection, 1, true) then
-            selection_index = i
-            break
-        end
-    end
-
-    if not selection_index then
-        return '"' .. selection .. '"'
-    end
-
-    -- get before and after words
-    local start_idx = math.max(1, selection_index - window)
-    local end_idx = math.min(#words, selection_index + window)
-
-    local before = table.concat(words, " ", start_idx, selection_index - 1)
-    local after = table.concat(words, " ", selection_index + 1, end_idx)
-
-    local context = string.format("%s {%s} %s", before, selection, after)
-    return context
-end
-
-function get_selection_in_context(document, selection, window)
+local function get_selection_in_context(document, selection, window)
     window = window or 10
     local page_text = get_page_text(document)
     if not page_text or not selection or selection == "" then
         return ""
     end
 
-    -- Escape Lua pattern chars in selection
-    local function escape_lua_pattern(s)
-        return (s:gsub("([%%%^%$%(%)%[%]%.%*%+%-%?])", "%%%1"))
-    end
-
-    local safe = escape_lua_pattern(selection)
-
-    -- Find the exact selection (first occurrence)
-    local s_pos, e_pos = page_text:find(safe)
+    -- Plain matching handles punctuation and UTF-8 without Lua-pattern escaping.
+    local s_pos, e_pos = page_text:find(selection, 1, true)
     if not s_pos then
         -- Fallback if not found
         return '"' .. selection .. '"'
@@ -131,11 +78,7 @@ function get_selection_in_context(document, selection, window)
     end
     local after = table.concat(after_tokens, " ")
 
-    -- Build output with no extra spaces if before/after are empty
-    local left  = (before ~= "" and (before .. "") or "")
-    local right = (after  ~= "" and ("" .. after)  or "")
-
-    return left .. ' {{{ ' .. selection .. ' }}} ' .. right
+    return before .. ' {{{ ' .. selection .. ' }}} ' .. after
 end
 
 return get_selection_in_context

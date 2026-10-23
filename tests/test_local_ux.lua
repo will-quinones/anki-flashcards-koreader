@@ -52,7 +52,10 @@ stub("settings_viewer", {menu_items = function() return {} end})
 stub("settings_state", dofile(plugin_dir .. "settings_state.lua"))
 local learning_started = 0
 stub("learning", {start = function() learning_started = learning_started + 1 end})
-stub("highlight_menu", {install = function() return false end})
+stub("util", {tableDeepCopy = function(t)
+    local c = {}; for k, v in pairs(t) do c[k] = v end; return c
+end})
+stub("highlight_menu", dofile(plugin_dir .. "highlight_menu.lua"))
 stub("auto_send", {new = function() return {start = function() end, stop = function() end,
     settings_changed = function() end} end})
 local plugin = dofile(plugin_dir .. "main.lua")
@@ -66,6 +69,10 @@ browser:init()
 local items = {}
 browser:addToMainMenu(items)
 assert(registered == 1 and items.ankiflashcards.sorting_hint == "tools")
+assert(#items.ankiflashcards.sub_item_table == 3)
+for i, text in ipairs({"Configuración", "Tarjetas", "Estadísticas por libro"}) do
+    assert(items.ankiflashcards.sub_item_table[i].text == text)
+end
 assert(items.ankiflashcards.sub_item_table[1].sub_item_table_func)
 local card_items = items.ankiflashcards.sub_item_table[2].sub_item_table_func()
 card_items[1].callback()
@@ -81,12 +88,20 @@ local highlight = {
     addToHighlightDialog = function(_, id, callback) buttons[id] = callback end,
     saveHighlight = function() highlight_saved = highlight_saved + 1 end,
     onClose = function(self) self.selected_text = nil end,
+    onTap = function(self, _, gesture)
+        if self.hold_pos or not gesture then return false end
+        self:showHighlightDialog(1)
+        return true
+    end,
+    showHighlightDialog = function() end,
+    onShowHighlightMenu = function() end,
 }
 local reader = instance({
     menu = menu, highlight = highlight,
     dictionary = {addToDictButtons = function(_, spec) dict_buttons[spec.id] = spec end},
     document = { getProps = function() return {title = "Libro", authors = "Autor"} end },
 })
+highlight.ui = reader.ui
 reader:init()
 local dict_button = dict_buttons.ankiflashcards_card
 assert(buttons.ankiflashcards_4 and dict_button)
@@ -96,6 +111,9 @@ assert(buttons.ankiflashcards_2 == nil and buttons.ankiflashcards_3 == nil)
 for _, factory in pairs(buttons) do
     local button = factory(highlight)
     assert(button.text ~= "Anki Manage" and button.text ~= "My Cards")
+end
+for id in pairs(buttons) do
+    assert(id == "ankiflashcards_4" or id == "ankiflashcards_5" or id == "ankiflashcards_edit_highlight")
 end
 assert(dict_buttons.ankiflashcards_learn.text == "Anki Learn")
 local popup = {highlight = highlight, onClose = function(_, preserve)
@@ -119,7 +137,6 @@ print("PASS: single-word dictionary action preserves selection without forcing a
 -- A saved Vocab, Learn, or both must keep the same highlight action menu.
 local annotations = require("annotation_tools")
 local capture, find = annotations.capture, annotations.find_card
-annotations.capture = function() return {} end
 stub("util", {tableDeepCopy = function(t) local c = {}; for k,v in pairs(t) do c[k] = v end; return c end})
 reader.ui.annotation = {annotations = {{text = "fragmento", pos0 = "start", pos1 = "end"}}}
 highlight.ui = reader.ui
@@ -128,13 +145,22 @@ highlight.view = {highlight = {visible_boxes = {{index = 1, rect = {x = 0, y = 0
 local menus = 0
 highlight.onShowHighlightMenu = function(_, index) assert(index == 1); menus = menus + 1 end
 package.loaded.learning.show = function() error("A highlight tap must not open a saved card") end
-for _, saved in ipairs({"vocab", "learn", "both"}) do
-    annotations.find_card = function(_, kind) return (saved == kind or saved == "both") and {kind = kind} or nil end
-    assert(highlight:onTap(nil, {pos = {x = 10, y = 10}}) == true)
+local load_cards = package.loaded.card_storage.load_cards
+package.loaded.card_storage.load_cards = function() error("Native taps must not read the card database") end
+package.loaded.card_generator.generate_quick_lookup = function() error("Native taps must never call AI") end
+for _, saved in ipairs({"vocab", "learn", "both", "none"}) do
+    for _, color in ipairs({"yellow", "purple"}) do
+        local annotation = reader.ui.annotation.annotations[1]
+        annotation.color, annotation.note = color, "Mi nota personal"
+        annotations.find_card = function(_, kind) return (saved == kind or saved == "both") and {kind = kind} or nil end
+        assert(highlight:onTap(nil, {pos = {x = 10, y = 10}}) == true)
+        assert(annotation.note == "Mi nota personal")
+    end
 end
-assert(menus == 3 and highlight.selected_text.text == "fragmento")
+assert(menus == 8 and highlight.selected_text.text == "fragmento")
+package.loaded.card_storage.load_cards = load_cards
 annotations.capture, annotations.find_card = capture, find
-print("PASS: saved Vocab/Learn highlights keep their full native action menu, without auto-opening cards")
+print("PASS: every highlight color keeps the native menu and personal notes, without card reads, AI calls or automatic cards")
 
 -- Older KOReader versions without dictionary extension API still load normally.
 local legacy = instance({menu = menu, highlight = highlight, dictionary = {}})

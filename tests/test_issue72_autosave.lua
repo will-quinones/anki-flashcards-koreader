@@ -469,7 +469,8 @@ local function reset_main(card_results, options)
     end
     local plugin = require("main")
     local highlight = {
-        onTap = function() end,
+        onTap = function(self) self:showHighlightDialog(1); return true end,
+        showHighlightDialog = function() end,
         onClose = function() end,
         onShowHighlightMenu = function() end,
         addToHighlightDialog = function(_, id, builder) entries[id] = builder end,
