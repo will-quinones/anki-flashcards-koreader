@@ -23,7 +23,7 @@ package.loaded.card_storage = {
             if card.kind == "learn" and saved.kind == "learn" and saved.card_id == card.card_id then return false, "already_saved" end
             if card.kind ~= "learn" and saved.kind ~= "learn" and saved.phrase == card.phrase then return false, "already_saved" end
         end
-        cards[#cards+1] = card; return true
+        card._storage_id = card._storage_id or ("saved-" .. (#cards+1)); cards[#cards+1] = card; return true
     end,
     add_annotation_alias = function(card, key) card.annotation_aliases = card.annotation_aliases or {}; table.insert(card.annotation_aliases, key); return true end,
 }

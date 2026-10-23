@@ -1,5 +1,8 @@
--- Focused LuaJIT regression harness for issue #72 automatic card saving.
+-- Issue #72 persistence, explicit preview saving and asynchronous media regressions.
 package.path = "./AnkiFlashcards.koplugin/?.lua;" .. package.path
+local KOReader = dofile("tests/support/koreader.lua")
+KOReader.install()
+local test_fs = KOReader.memory_filesystem()
 
 local function copy_card(card)
     local copy = {}
@@ -20,7 +23,7 @@ package.preload["json"] = function()
 end
 package.loaded["card_storage"] = nil
 local CardStorage = require("card_storage")
-os.remove("/tmp/anki_flashcards.json")
+os.remove(require("storage_paths").cards)
 
 local original = {
     phrase = "anchor", definition = "first", book_title = "Book",
@@ -45,7 +48,7 @@ assert(not io.open("/tmp/issue72-replace-old.png", "r"),
 assert(not CardStorage.update_image_path(original, "/tmp/stale.png"), "stale async image must not update replacement")
 assert(CardStorage.update_image_path(regenerated, "/tmp/current.png"), "current async image must update replacement")
 assert(CardStorage.load_cards()[1].image_path == "/tmp/current.png", "current async image was not persisted")
-os.remove("/tmp/anki_flashcards.json")
+os.remove(require("storage_paths").cards)
 
 -- The normalized phrase uniqueness invariant applies to edits and full
 -- regenerations as well as initial saves. Rejections preserve both records and
@@ -65,7 +68,7 @@ cards = CardStorage.load_cards()
 assert(#cards == 2 and cards[1].phrase == "alpha" and cards[1].sent_to_anki
        and cards[2].phrase == "beta" and not cards[2].sent_to_anki,
        "rejected phrase collisions must not mutate records or sent-state targeting")
-os.remove("/tmp/anki_flashcards.json")
+os.remove(require("storage_paths").cards)
 
 -- Same-phrase requests started in one mocked second get distinct media paths.
 -- Complete the second request first, persist it, then clean the stale first
@@ -135,7 +138,7 @@ do
     assert(not CardStorage.remove_image_if_unreferenced(completed.second),
            "persisted current path must be protected from cleanup")
     os.remove(completed.second)
-    os.remove("/tmp/anki_flashcards.json")
+    os.remove(require("storage_paths").cards)
     os.time = saved_time
     package.loaded.json = saved_json
     package.loaded["image_generator"] = nil
@@ -236,7 +239,7 @@ do
         return true
     end
     local AtomicStorage = require("card_storage")
-    local live = "/atomic-test/anki_flashcards.json"
+    local live = require("storage_paths").cards
     local function reset_valid()
         files, encoded_data, serial = {}, {}, 0
         encoded_data.valid = { { phrase = "legacy", definition = "original" } }
@@ -287,6 +290,7 @@ local function reset_main(card_results, options)
         if not options.legacy_saved_card then
             saved._storage_id = saved._storage_id or "saved-highlight-1"
         end
+        saved.book_title, saved.book_author = "Book", "Author"
         storage_cards[1] = saved
     end
     package.loaded["main"] = nil
@@ -294,11 +298,11 @@ local function reset_main(card_results, options)
         "configuration", "device", "gettext", "ui/widget/infomessage", "ui/widget/notification",
         "ui/widget/container/inputcontainer", "ui/uimanager", "ui/network/manager", "selection_context",
         "card_generator", "card_viewer", "card_storage", "anki_sync", "card_manager", "card_sync",
-        "highlight_inbox", "image_generator", "audio_generator",
+        "highlight_inbox", "image_generator", "audio_generator", "settings_viewer", "vocab_generation", "learning",
     }) do
         package.loaded[name] = nil
     end
-    package.preload["configuration"] = function() return { target_language = "English" } end
+    package.preload["configuration"] = function() return { target_language = "English", image_provider = options.images_enabled and "dashscope" or "none" } end
     package.preload["device"] = function() return { hasClipboard = function() return true end } end
     package.preload["gettext"] = function() return function(s) return s end end
     package.preload["ui/widget/infomessage"] = function() return { new = function(_, options) return options end } end
@@ -312,9 +316,13 @@ local function reset_main(card_results, options)
                 if widget.is_viewer then viewers[#viewers + 1] = widget
                 elseif widget.text then shown_messages[#shown_messages + 1] = widget.text end
             end,
-            close = function() end,
+            close = function(_, widget)
+                if widget then widget._anki_closed = true; if widget.on_dismiss and not widget._replacing then widget.on_dismiss() end end
+            end,
+            getTopmostVisibleWidget = function() local v = viewers[#viewers]; return v and not v._anki_closed and v or nil end,
             setDirty = function() end,
             scheduleIn = function(_, delay, callback) if delay < 1 then callback() end end,
+            unschedule = function() end,
             topdown_widgets_iter = function()
                 local yielded = false
                 return function()
@@ -363,6 +371,15 @@ local function reset_main(card_results, options)
         local next_id = 0
         return {
             load_anki_settings = function() return nil end,
+            is_saved = function(card)
+                for _, saved in ipairs(storage_cards) do
+                    if (card._storage_id and saved._storage_id == card._storage_id) or (not card._storage_id and saved.phrase == card.phrase) then return true end
+                end
+                return false
+            end,
+            find_by_phrase = function(phrase)
+                for _, saved in ipairs(storage_cards) do if saved.phrase == phrase then return copy_card(saved) end end
+            end,
             save_card = function(card)
                 next_id = next_id + 1
                 card._storage_id = tostring(next_id)
@@ -427,16 +444,21 @@ local function reset_main(card_results, options)
                 return nil
             end,
             find_by_phrase_fuzzy = function() return nil end,
-            load_cards = function() return storage_cards end,
+            load_cards = function() return KOReader.copy(storage_cards) end,
         }
     end
     package.preload["anki_sync"] = function() return { send_card = function() return true end } end
-    package.preload["card_manager"] = function() return { show = function() end, show_manage = function() end } end
+    package.preload["card_manager"] = nil
+    package.preload["settings_viewer"] = function() return {menu_items = function() return {} end} end
+    package.preload["vocab_generation"] = function() return {cancel_all = function() end, start = function(config, source, success)
+        local card = require("card_generator").generate(config, source.phrase, source.context, source.title, source.author)
+        if card then success(card) end
+    end} end
     package.preload["card_sync"] = function() return { run_sync = function() end } end
     package.preload["highlight_inbox"] = function() return { show = function() end } end
     package.preload["image_generator"] = function()
         return {
-            images_enabled = function() return options.images_enabled or false end,
+            is_enabled = function() return options.images_enabled or false end,
             generate_async = function(_, _, _, on_success) image_callbacks[#image_callbacks + 1] = on_success end,
         }
     end
@@ -449,9 +471,11 @@ local function reset_main(card_results, options)
     local highlight = {
         onTap = function() end,
         onClose = function() end,
+        onShowHighlightMenu = function() end,
         addToHighlightDialog = function(_, id, builder) entries[id] = builder end,
     }
     plugin.ui = {
+        menu = {registerToMainMenu = function() end},
         highlight = highlight,
         annotation = { annotations = {} },
         document = { getProps = function() return { title = "Book", authors = "Author" } end },
@@ -466,7 +490,9 @@ end
 
 local action = reset_main({ { phrase = "anchor", definition = "first" }, { phrase = "anchored", definition = "replacement" } })
 action.callback()
-assert(events[1] == "save" and events[2] == "viewer", "card must save before its viewer is created: " .. table.concat(events, ","))
+assert(events[1] == "viewer" and #storage_cards == 0, "preview must not save implicitly")
+assert(viewers[#viewers].on_save())
+assert(events[2] == "save", "explicit Save must persist the preview")
 assert(#storage_cards == 1 and storage_cards[1].book_title == "Book", "initial generation must persist metadata")
 viewers[#viewers].on_regenerate()
 assert(#storage_cards == 1 and storage_cards[1].phrase == "anchored", "regeneration must replace, not duplicate")
@@ -476,6 +502,7 @@ assert(storage_cards[1].highlight_pos0 == "p0" and storage_cards[1].highlight_po
 -- its phrase, so update_card never has to discover the old phrase afterwards.
 local legacy_primary_action = reset_main({ { phrase = "legacy primary", definition = "first" } })
 legacy_primary_action.callback()
+assert(viewers[#viewers].on_save())
 local legacy_primary_viewer = viewers[#viewers]
 storage_cards[1]._storage_id, legacy_primary_viewer.card._storage_id = nil, nil
 assert(legacy_primary_viewer.on_prepare_update(legacy_primary_viewer.card),
@@ -501,7 +528,8 @@ local function open_saved_highlight(saved_card, options)
         highlight = { visible_boxes = {{ rect = { x = 0, y = 0, w = 100, h = 100 }, index = 1 }} },
         screenToPageTransform = function(_, pos) return pos end,
     }
-    assert(highlight:onTap(nil, { pos = { x = 1, y = 1 } }), "saved highlight tap must open its card viewer")
+    assert(highlight:onTap(nil, { pos = { x = 1, y = 1 } }), "saved highlight tap must keep its native menu")
+    entries.ankiflashcards_4({selected_text = plugin.ui.annotation.annotations[1]}).callback()
     return viewers[#viewers]
 end
 
@@ -521,7 +549,7 @@ assert(storage_cards[1].ipa == "/edited/", "saved-highlight IPA regeneration mus
 assert(#viewer_updates == 1 and viewer_updates[1].viewer == highlight_viewer,
        "saved-highlight IPA regeneration must redraw only its visible viewer")
 -- Reopen by its unchanged highlight identity, not its old phrase.
-assert(highlight_viewer.on_highlight_dialog, "saved highlight navigation must remain available")
+assert(highlight_viewer.on_navigate_to_source, "saved highlight navigation must remain available")
 local reopened_viewer = open_saved_highlight(storage_cards[1])
 assert(reopened_viewer.card.definition == "persisted edit" and reopened_viewer.card.ipa == "/edited/",
        "reopened saved highlight must read the persisted edit and IPA")
@@ -529,7 +557,7 @@ assert(reopened_viewer.card.definition == "persisted edit" and reopened_viewer.c
 local legacy_highlight_viewer = open_saved_highlight({
     phrase = "legacy highlight", definition = "original", highlight_pos0 = "legacy-p0", highlight_pos1 = "legacy-p1",
 }, { legacy_saved_card = true })
-assert(not legacy_highlight_viewer.card._storage_id, "legacy highlight setup must omit storage identity")
+assert(legacy_highlight_viewer.card._storage_id, "opening a saved legacy card must migrate its identity")
 assert(legacy_highlight_viewer.on_prepare_update(legacy_highlight_viewer.card),
        "tapped-highlight viewer must migrate identity before editing")
 legacy_highlight_viewer.card.phrase = "renamed highlight"
@@ -564,6 +592,7 @@ local pending_action = reset_main({
     { phrase = "anchored", definition = "replacement", image_prompt = "replacement image", _audio_status = "pending", _ankivocab_word = "anchored" },
 }, { images_enabled = true })
 pending_action.callback()
+assert(viewers[#viewers].on_save())
 assert(#image_callbacks == 1 and #audio_callbacks == 1, "initial pending card must start image and audio work")
 viewers[#viewers].on_regenerate()
 assert(#image_callbacks == 2, "regenerated card must start replacement image work")
@@ -589,6 +618,7 @@ local ordinary_edit_action = reset_main({ {
     phrase = "anchor", definition = "first", image_prompt = "old image", _audio_status = "pending", _ankivocab_word = "anchor",
 } }, { images_enabled = true })
 ordinary_edit_action.callback()
+assert(viewers[#viewers].on_save())
 local ordinary_edit_viewer = viewers[#viewers]
 assert(#image_callbacks == 1 and #audio_callbacks == 1, "ordinary-edit setup must start image and audio callbacks")
 ordinary_edit_viewer.card.phrase = "edited"
@@ -623,6 +653,7 @@ local media_action = reset_main({ {
     phrase = "anchor", definition = "first", image_prompt = "image", image_path = old_image,
 } }, { images_enabled = true })
 media_action.callback()
+assert(viewers[#viewers].on_save())
 local media_viewer = viewers[#viewers]
 media_viewer.on_regen_image()
 media_viewer.on_regen_image()
@@ -640,9 +671,10 @@ local dismissed_action = reset_main({ {
     phrase = "dismiss", definition = "first", image_prompt = "image",
 } }, { images_enabled = true })
 dismissed_action.callback()
+assert(viewers[#viewers].on_save())
 local dismissed_viewer = viewers[#viewers]
 local f = assert(io.open(dismissed_image, "w")); f:write("x"); f:close()
-dismissed_viewer.on_close()
+require("ui/uimanager"):close(dismissed_viewer)
 image_callbacks[1](dismissed_image)
 assert(not io.open(dismissed_image, "r") and not storage_cards[1].image_path,
        "dismissed viewer must reject and clean its late image callback")
@@ -655,6 +687,8 @@ local failed_media_action = reset_main({ {
     phrase = "failure", definition = "first", image_prompt = "image", image_path = retained_old,
 } }, { images_enabled = true, update_image_fails = true })
 failed_media_action.callback()
+assert(viewers[#viewers].on_save())
+assert(viewers[#viewers].on_save())
 viewers[#viewers].on_regen_image()
 image_callbacks[2](rejected_new)
 assert(io.open(retained_old, "r") and not io.open(rejected_new, "r"),
@@ -670,35 +704,39 @@ assert(#storage_cards == 0 and #viewers == 0, "failed generation must not save o
 -- the live card table untouched until the durable update succeeds.
 local full_failure = reset_main({ { phrase = "anchor", definition = "first" }, false })
 full_failure.callback()
+assert(viewers[#viewers].on_save())
 local original_full_viewer = viewers[#viewers]
 original_full_viewer.on_regenerate()
-assert(#viewers == 2 and viewers[#viewers].card.phrase == "anchor",
+assert(#viewers == 1 and viewers[#viewers].card.phrase == "anchor",
        "failed full regeneration must restore the existing viewer")
 assert(storage_cards[1].phrase == "anchor", "failed full regeneration must retain stored card")
 
 local replace_failure = reset_main({ { phrase = "anchor", definition = "first" }, { phrase = "replacement" } },
                                    { replace_fails = true })
 replace_failure.callback()
+assert(viewers[#viewers].on_save())
 local replace_failure_viewer = viewers[#viewers]
 replace_failure_viewer.on_regenerate()
-assert(#viewers == 2 and viewers[#viewers].card.phrase == "anchor",
+assert(#viewers == 1 and viewers[#viewers].card.phrase == "anchor",
        "failed replacement persistence must restore the existing viewer")
 assert(storage_cards[1].phrase == "anchor", "failed replacement persistence must retain stored card")
 
 local collision_restore = reset_main({ { phrase = "anchor", definition = "first" }, { phrase = "beta" } },
                                     { replace_fails = true, replace_error = "already_saved" })
 collision_restore.callback()
+assert(viewers[#viewers].on_save())
 viewers[#viewers].on_regenerate()
-assert(#viewers == 2 and viewers[#viewers].card.phrase == "anchor"
+assert(#viewers == 1 and viewers[#viewers].card.phrase == "anchor"
        and storage_cards[1].phrase == "anchor",
        "duplicate regeneration rejection must restore the current viewer without mutation")
 
 local sentence_failure = reset_main({ { phrase = "anchor", definition = "first", text = "old", image_prompt = "old prompt" } },
                                    { text_results = { { text = "new", prompt = "new prompt" } }, update_card_fails = true })
 sentence_failure.callback()
+assert(viewers[#viewers].on_save())
 local original_sentence_viewer = viewers[#viewers]
 original_sentence_viewer.on_regen_text()
-assert(#viewers == 2 and viewers[#viewers].card.text == "old" and viewers[#viewers].card.image_prompt == "old prompt",
+assert(#viewers == 1 and viewers[#viewers].card.text == "old" and viewers[#viewers].card.image_prompt == "old prompt",
        "failed sentence persistence must restore the existing viewer state")
 assert(storage_cards[1].text == "old" and storage_cards[1].image_prompt == "old prompt",
        "failed sentence persistence must not mutate in-memory or stored card state")
@@ -780,7 +818,7 @@ local RealCardViewer = require("card_viewer")
 RealCardViewer:new { card = { phrase = "anchor" }, show_back = true }
 assert(rendered_buttons, "CardViewer did not build an action row")
 for _, button in ipairs(rendered_buttons) do
-    assert(not tostring(button.text):find("Save", 1, true), "Save button must not be rendered")
+    if button.id == "save" then assert(button.text == "Guardar" or button.text == "Borrar del Kobo…") end
 end
 
 local failing_card = { phrase = "anchor", definition = "original", ipa = "/old/" }
@@ -795,7 +833,7 @@ assert(last_input_dialog and last_input_dialog.buttons[1][2], "CardViewer edit d
 last_input_dialog.buttons[1][2].callback()
 assert(failing_card.phrase == "anchor" and failing_card.ipa == "/old/",
        "CardViewer must restore in-memory state after a failed persisted edit")
-assert(last_info_text == "A card with this phrase is already saved",
+assert(last_info_text == "already_saved",
        "CardViewer must display the duplicate edit failure")
 
 local prepared_phrase, updated_phrase
@@ -819,17 +857,5 @@ last_input_dialog.buttons[1][2].callback()
 assert(prepared_phrase == "legacy anchor" and updated_phrase == "renamed legacy",
        "CardViewer must capture legacy identity before mutating phrase")
 
-local function read(path)
-    local file = assert(io.open(path, "r"))
-    local content = file:read("*all")
-    file:close()
-    return content
-end
-local viewer_source = read("./AnkiFlashcards.koplugin/card_viewer.lua")
-local main_source = read("./AnkiFlashcards.koplugin/main.lua")
-local manager_source = read("./AnkiFlashcards.koplugin/card_manager.lua")
-assert(not viewer_source:find('id      = "save"', 1, true), "Save button must not be rendered")
-assert(not viewer_source:find("on_save", 1, true) and not main_source:find("on_save", 1, true)
-       and not manager_source:find("on_save", 1, true), "manual Save callback path must be removed")
-
-print("issue #72 autosave harness: PASS")
+test_fs:restore()
+print("PASS: storage integrity, explicit preview saving, legacy identities, regeneration rollback and stale media/IPA protection")

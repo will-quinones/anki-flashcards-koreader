@@ -49,3 +49,29 @@ for _, back in ipairs({false, true}) do
 end
 assert(answer_flips == 1 and question_flips == 2)
 print("PASS: learning viewer shows question only on front; answer/evidence/source on back; Save/Send on both")
+
+local regenerate, dismissed = 0, 0
+package.loaded.card_storage.is_saved = function() return false end
+for _, back in ipairs({false,true}) do
+    local viewer = setmetatable({card={phrase="word"},show_back=back,
+        on_regenerate=function() regenerate=regenerate+1 end},{__index=Viewer})
+    viewer:init()
+    local button=viewer.button_table.buttons[2][3]
+    assert(button.id=="regenerate" and button.text=="Regenerar"); button.callback()
+end
+assert(regenerate==2)
+local UI=package.loaded["ui/uimanager"]
+UI.setDirty=function() end
+UI.close=function(_,widget) widget:onCloseWidget() end
+Viewer.new=function(_,spec)
+    local viewer=setmetatable(spec,{__index=Viewer}); viewer:init(); return viewer
+end
+local stream=Viewer:new {card={},generating=true,stream_text="partial",generation_label="Generando tarjeta…",
+    on_dismiss=function() dismissed=dismissed+1 end}
+assert(#stream.button_table.buttons==1 and #stream.button_table.buttons[1]==1)
+assert(stream.button_table.buttons[1][1].text=="Cerrar")
+local updated=stream:update()
+assert(dismissed==0 and updated.generating and updated.stream_text=="partial")
+updated:onClose(); updated:onCloseWidget()
+assert(dismissed==1)
+print("PASS: Regenerate on both sides, close-only streaming modal, redraw preserves state and real close dismisses exactly once")

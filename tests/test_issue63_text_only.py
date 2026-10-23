@@ -21,6 +21,7 @@ def run_lua(script: str) -> None:
 
 LUA_STUBS = r'''
 package.path = "./AnkiFlashcards.koplugin/?.lua;" .. package.path
+dofile("tests/support/koreader.lua").install()
 local state = { requests = {}, schedules = {}, image_calls = 0 }
 _G.TEST_STATE = state
 
@@ -85,7 +86,7 @@ package.preload["ui/uimanager"] = function()
         scheduleIn = function(_, seconds, callback)
             state.schedules[#state.schedules + 1] = { seconds = seconds, callback = callback }
         end,
-        show = function() end, close = function() end, setDirty = function() end,
+        show = function() end, close = function() end, setDirty = function() end, unschedule = function() end,
     }
 end
 '''
@@ -165,20 +166,33 @@ def test_inbox_guard_skips_image_launch_for_text_only_cards():
     run_lua(
         LUA_STUBS
         + r'''
-local menu
-package.preload["ui/network/manager"] = function() return { runWhenOnline = function(_, cb) cb() end } end
-package.preload["ui/widget/menu"] = function() return { new = function(_, t) menu = t; return t end } end
-package.preload["ui/widget/notification"] = function() return { new = function(_, t) return t end } end
-package.preload["card_storage"] = function() return { load_cards = function() return {} end, save_card = function() return true end, update_image_path = function() end } end
-package.preload["card_generator"] = function() return { generate = function() return { phrase = "run", text = "{{c1::run}} home" } end } end
-package.preload["image_generator"] = function()
-    return { images_enabled = function(config) return config.images_enabled ~= false end,
-             generate_async = function() TEST_STATE.image_calls = TEST_STATE.image_calls + 1 end }
-end
-local Inbox = require("highlight_inbox")
-Inbox.show({ document = { getProps = function() return { title = "Book", authors = "Author" } end }, annotation = { annotations = {{ drawer = true, text = "Run" }} } }, { images_enabled = false })
-menu.item_table[1].callback()
-assert(TEST_STATE.image_calls == 0, "inbox launched image generation in text-only mode")
+local dialog, confirm, saved = nil, nil, {}
+package.preload["ui/network/manager"] = function() return {runWhenOnline = function(_, cb) cb() end} end
+package.preload["ui/widget/buttondialog"] = function() return {new = function(_, spec) dialog = spec; return spec end} end
+package.preload["ui/widget/confirmbox"] = function() return {new = function(_, spec) confirm = spec; return spec end} end
+package.preload["card_storage"] = function() return {
+    load_cards = function() return saved end, load_anki_settings = function() return nil end,
+    save_card = function(card) saved[#saved+1] = card; return true end,
+} end
+package.preload["card_generator"] = function() return {generate_learning = function(_, source)
+    return {kind="learn", card_id=require("learning_card").id(source), phrase="A question", question="A question", answer="An answer"}
+end} end
+package.preload["image_generator"] = function() return {
+    is_enabled = function(config) return config.images_enabled ~= false end,
+    generate_async = function() TEST_STATE.image_calls = TEST_STATE.image_calls + 1 end,
+} end
+local annotation={text="A complete selected idea from this book",pos0="start",pos1="end",drawer="lighten"}
+local ui={document={file="/book.epub",getProps=function() return {title="Book",authors="Author"} end},
+    annotation={annotations={annotation}}}
+require("highlight_inbox").show(ui,{images_enabled=false,dashscope_api_key="key"})
+assert(dialog and dialog.buttons[1][3].icon=="plus")
+dialog.buttons[1][3].callback()
+assert(confirm and #saved==0)
+confirm.ok_callback()
+local index=1
+while TEST_STATE.schedules[index] do TEST_STATE.schedules[index].callback(); index=index+1; assert(index<30) end
+assert(#saved==1 and saved[1].kind=="learn", "annotation test must actually generate and save a learning card")
+assert(TEST_STATE.image_calls==0 and #TEST_STATE.requests==0, "text-only annotation generation dispatched media")
 '''
     )
 
@@ -208,12 +222,14 @@ end
 package.preload["card_viewer"] = function()
     return { new = function(_, t)
         viewer_options = t
-        return { update = function() return {} end }
+        t.update = function(self) return self end
+        return t
     end }
 end
 package.preload["card_storage"] = function()
     return {
         load_anki_settings = function() return nil end,
+        is_saved = function() return false end,
         save_card = function() return true end,
         update_card = function() return true end,
         update_image_path = function() end,
@@ -231,11 +247,18 @@ package.preload["highlight_inbox"] = function() return { show = function() end }
 package.preload["audio_generator"] = function() return { poll_ankivocab_async = function() end } end
 package.preload["image_generator"] = function()
     return {
-        images_enabled = function(config) return config.images_enabled ~= false end,
+        is_enabled = function(config) return config.images_enabled ~= false end,
         generate_async = function() TEST_STATE.image_calls = TEST_STATE.image_calls + 1 end,
     }
 end
 
+package.preload["vocab_generation"] = function() return {cancel_all=function() end,
+    start=function(config, source, success)
+        require("ui/uimanager"):scheduleIn(0.05,function()
+            success(require("card_generator").generate(config, source.phrase, source.context, source.title, source.author))
+        end)
+    end}
+end
 local Plugin = require("main")
 local highlight = {
     addToHighlightDialog = function(_, key, factory) registrations[key] = factory end,
@@ -245,6 +268,7 @@ local highlight = {
              screenToPageTransform = function(_, pos) return pos end },
 }
 local ui = {
+    menu = {registerToMainMenu = function() end},
     highlight = highlight,
     document = { getProps = function() return { title = "Book", authors = "Author" } end },
     annotation = { annotations = {{ pos0 = 1, pos1 = 2, text = "saved" }} },
@@ -253,21 +277,31 @@ highlight.ui = ui
 Plugin.ui = ui
 Plugin:init()
 
-local action = registrations["ankiflashcards_4"]({ selected_text = "Run", saveHighlight = function() end })
+local action = registrations["ankiflashcards_4"]({ selected_text = {text="Run",pos0="start",pos1="end"}, saveHighlight = function() end })
 local schedule_count = #TEST_STATE.schedules
 action.callback()
 assert(#TEST_STATE.schedules == schedule_count + 1, "normal generation did not queue its callback")
 TEST_STATE.schedules[schedule_count + 1].callback()
 assert(TEST_STATE.image_calls == 0, "normal text-only generation launched image work")
-assert(viewer_options.on_regen_image == nil, "normal text-only viewer exposed image regeneration")
+assert(not viewer_options.on_regen_image, "normal text-only viewer exposed image regeneration")
 schedule_count = #TEST_STATE.schedules
 viewer_options.on_regen_text()
 assert(#TEST_STATE.schedules == schedule_count + 1, "sentence regeneration did not queue its callback")
 TEST_STATE.schedules[schedule_count + 1].callback()
 assert(TEST_STATE.image_calls == 0, "sentence regeneration launched image work in text-only mode")
 
-highlight:onTap(nil, { pos = { x = 1, y = 1 } })
+schedule_count = #TEST_STATE.schedules
+viewer_options.on_regenerate()
+TEST_STATE.schedules[schedule_count + 1].callback()
+assert(TEST_STATE.image_calls == 0, "full regeneration launched image work in text-only mode")
+local saved = {phrase="saved",book_title="Book",book_author="Author",text="{{c1::saved}}",image_prompt="unexpected image",_storage_id="saved-id"}
+local storage = require("card_storage")
+storage.load_cards = function() return {saved} end
+storage.ensure_identity = function() return true end
+storage.find_by_phrase = function() return saved end
+package.loaded.card_manager, package.preload.card_manager = nil, nil
+require("card_manager").open_card({images_enabled=false}, saved, ui)
 assert(TEST_STATE.image_calls == 0, "saved-card auto-image path launched image work in text-only mode")
-assert(viewer_options.on_regen_image == nil, "saved-card viewer exposed image regeneration in text-only mode")
+assert(not viewer_options.on_regen_image, "saved-card viewer exposed image regeneration in text-only mode")
 '''
     )

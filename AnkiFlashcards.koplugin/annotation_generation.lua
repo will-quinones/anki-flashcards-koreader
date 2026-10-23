@@ -8,6 +8,7 @@ local State = require("settings_state")
 local Feedback = require("generation_feedback")
 local UI = require("ui/uimanager")
 local ImageGenerator = require("image_generator")
+local CardMedia = require("card_media")
 local Batch = {}
 local running = false
 
@@ -114,6 +115,9 @@ function Batch.start(ui, base, snapshots, kind, on_done, on_progress)
             A.bind(card, snapshot)
             local write_ok, saved, save_err = pcall(Storage.save_card, card)
             if not write_ok then saved, save_err = false, "storage_error" end
+            if saved and kind == "vocab" and not card._storage_id then
+                saved, save_err = false, "missing_identity"
+            end
             if saved then
                 report.generated = report.generated + 1; report.cards[#report.cards+1] = card
                 if kind == "vocab" and card.image_prompt and ImageGenerator.is_enabled(cfg) then
@@ -124,9 +128,16 @@ function Batch.start(ui, base, snapshots, kind, on_done, on_progress)
                         image_cfg._ankivocab_word = card._ankivocab_word or source.selected
                         image_cfg._ankivocab_image_url = card._image_url
                     end
-                    ImageGenerator.generate_async(image_cfg, card.image_prompt, card.phrase, function(path)
-                        card.image_path = path; Storage.update_image_path(card.phrase, path)
-                    end, nil)
+                    local id = card._storage_id
+                    ImageGenerator.generate_async(image_cfg, card.image_prompt, card.phrase,
+                        CardMedia.wrap(card, "image", function(path)
+                            local previous = card.image_path
+                            card.image_path = path
+                            if not Storage.update_image_path(card, path) then
+                                card.image_path = previous
+                                Storage.remove_image_if_unreferenced(path)
+                            end
+                        end, function() return card._storage_id == id end), nil)
                 end
             elseif save_err == "already_saved" then
                 local known

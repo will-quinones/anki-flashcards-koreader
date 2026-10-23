@@ -22,6 +22,7 @@ local CardGenerator  = require("card_generator")
 local CardViewer     = require("card_viewer")
 local ImageGenerator = require("image_generator")
 local NetworkMgr     = require("ui/network/manager")
+local CardMedia      = require("card_media")
 
 local InfoMessage   = require("ui/widget/infomessage")
 
@@ -450,7 +451,8 @@ function CardManager.menu_items(base_config, opts)
                     text        = _("¿Borrar todas las tarjetas guardadas en el Kobo? No borra las notas de Anki. Esta acción no se puede deshacer."),
                     ok_text     = _("Borrar del Kobo"),
                     ok_callback = function()
-                        CardStorage.clear_all()
+                        local ok = CardStorage.clear_all()
+                        if not ok then notify_error(_("No se pudieron borrar las tarjetas del Kobo. No se guardaron los cambios.")); return end
                         notify(_("All cards cleared"))
                     end,
                 })
@@ -577,6 +579,11 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
             local durable_identity = CardStorage.ensure_identity(card)
             local viewer_ref = {}
             local card_ref   = card
+            local function media_callback(c, kind, callback)
+                return CardMedia.wrap(c, kind, callback, function()
+                    return viewer_ref[1] ~= nil and viewer_ref[1].card == c
+                end)
+            end
             local function make_viewer(show_back)
                 local v
                 if not card.image_path or card.image_path == "" then
@@ -592,20 +599,58 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                     on_add_highlight = annotation_actions.on_add_highlight,
                     is_highlighted = annotation_actions.is_highlighted,
                     can_add_highlight = annotation_actions.can_add_highlight,
+                    on_dismiss = function()
+                        CardMedia.invalidate(card)
+                        viewer_ref[1] = nil
+                        require("reading_marker").flash(ui, card.annotation_source)
+                    end,
                     on_show_answer = function()
                         -- Close whichever viewer is currently showing
                         -- (may differ from v after an async image update).
                         local cur = viewer_ref[1] or v
+                        cur._replacing = true
                         UIManager:close(cur)
                         viewer_ref[1] = make_viewer(true)
                     end,
                     on_show_question = function()
-                        UIManager:close(viewer_ref[1] or v)
+                        local cur = viewer_ref[1] or v
+                        cur._replacing = true
+                        UIManager:close(cur)
                         viewer_ref[1] = make_viewer(false)
                     end,
                     on_viewer_updated = function(updated) viewer_ref[1] = updated end,
                     on_save = function()
-                        return nil, _("Already saved")
+                        local ok, err = CardStorage.save_card(card)
+                        if ok then Annotations.highlight_saved(effective_config(base_config), ui, card) end
+                        return ok, err
+                    end,
+                    on_regenerate = function()
+                        NetworkMgr:runWhenOnline(function()
+                            if not viewer_ref[1] or viewer_ref[1]._anki_closed then return end
+                            local source = card.annotation_source
+                            local selection = source and source.selection
+                            local phrase = selection and selection.text or card.selected_text or card.phrase
+                            require("vocab_generation").start(base_config, {phrase = phrase,
+                                context = card.source_context or (selection and selection.text) or phrase,
+                                title = card.book_title, author = card.book_author}, function(generated)
+                                generated.book_title, generated.book_author = card.book_title, card.book_author
+                                generated.source = generated.source or card.source
+                                generated.highlight_pos0, generated.highlight_pos1 = card.highlight_pos0, card.highlight_pos1
+                                Annotations.bind(generated, source)
+                                if CardStorage.is_saved(card) then
+                                    local ok, err = CardStorage.replace_card(card, generated)
+                                    if not ok then notify_error(_("No se pudo guardar la tarjeta regenerada.")); return end
+                                end
+                                local current = viewer_ref[1]
+                                CardMedia.invalidate(card)
+                                if current then current._replacing = true; UIManager:close(current) end
+                                card, card_ref = generated, generated
+                                durable_identity = generated._storage_id ~= nil
+                                viewer_ref[1] = make_viewer(false)
+                            end, {regenerating = true, is_valid = function()
+                                return viewer_ref[1] ~= nil and not (ui and ui.tearing_down)
+                            end})
+                        end)
                     end,
                     on_send = function()
                         return AnkiSync.send_card(anki_config, card, base_config)
@@ -620,7 +665,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                     end or nil,
                     on_update = function(updated_card)
                         local ok, err = CardStorage.update_card(card_ref, updated_card)
-                        if ok then card_ref.phrase = updated_card.phrase end
+                        if ok then card_ref.phrase = updated_card.phrase; CardMedia.invalidate(card) end
                         return ok, err
                     end,
                     on_prepare_update = function(editing_card)
@@ -639,7 +684,8 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                     notify_error(save_err or _("Could not save regenerated text"))
                                     return
                                 end
-                                if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
+                                CardMedia.invalidate(card)
+                                if viewer_ref[1] then viewer_ref[1]._replacing = true; UIManager:close(viewer_ref[1]) end
                                 viewer_ref[1] = make_viewer(true)
                                 -- Kick off image generation with new prompt.
                                 if new_prompt then
@@ -647,7 +693,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                         base_config,
                                         new_prompt,
                                         card.phrase,
-                                        function(img_path)
+                                        media_callback(card, "image", function(img_path)
                                             local old_image = card.image_path
                                             card.image_path = img_path
                                             local image_saved = CardStorage.update_image_path(card, img_path)
@@ -663,7 +709,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                             if Feedback.is_top(viewer_ref[1]) then
                                                 viewer_ref[1] = viewer_ref[1]:update(card)
                                             end
-                                        end,
+                                        end),
                                         nil
                                     )
                                 end
@@ -685,7 +731,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                             base_config,
                             card.image_prompt,
                             card.phrase,
-                            function(img_path)
+                            media_callback(card, "image", function(img_path)
                                 card.image_path = img_path
                                 local saved = CardStorage.update_image_path(card, img_path)
                                 if not saved then
@@ -702,7 +748,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                 end
                                 UIManager:setDirty(nil, "full")
                                 notify(_("New image loaded!"))
-                            end,
+                            end),
                             function(err)
                                 notify_error(_("Imagen: ") .. Feedback.image_message(err))
                             end
@@ -711,7 +757,9 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                     on_regen_ipa = function(new_phrase, updated_card, new_viewer)
                         NetworkMgr:runWhenOnline(function()
                             UIManager:scheduleIn(0.05, function()
+                                if updated_card.phrase ~= new_phrase then return end
                                 local ipa, err = CardGenerator.generate_ipa(base_config, new_phrase)
+                                if updated_card.phrase ~= new_phrase then return end
                                 if ipa then
                                     updated_card.ipa = ipa
                                     CardStorage.update_card(card_ref, updated_card)
@@ -747,6 +795,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                   or is_ankivocab_card
             if (not card.image_path or card.image_path == "")
                 and has_image_source
+                and ImageGenerator.is_enabled(base_config)
                 and not (target and target._skip_auto_image)
                 and not (ImageGenerator.is_pending and ImageGenerator.is_pending(card.phrase))
                 and NetworkMgr:isOnline() and durable_identity then
@@ -754,15 +803,26 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                     img_cfg,
                     card.image_prompt,
                     card.phrase,
-                    function(img_path)
+                    media_callback(card, "image", function(img_path)
+                        local previous = card.image_path
                         card.image_path = img_path
-                        CardStorage.update_image_path(card, img_path)
+                        if not CardStorage.update_image_path(card, img_path) then
+                            card.image_path = previous
+                            CardStorage.remove_image_if_unreferenced(img_path)
+                            return
+                        end
                         if Feedback.is_top(viewer_ref[1]) then
                             viewer_ref[1] = viewer_ref[1]:update(card)
                         end
-                    end,
+                    end),
                     nil  -- silent on error
                 )
+            end
+            if card._audio_status == "pending" and is_ankivocab_card and NetworkMgr:isOnline() then
+                require("audio_generator").poll_ankivocab_async(base_config, card._ankivocab_word,
+                    media_callback(card, "audio", function(url)
+                        if CardStorage.update_audio_url(card, url) then card._audio_url = url end
+                    end), nil)
             end
         end
 
@@ -798,7 +858,10 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
                                     return
                                 end
                                 local ok, err = CardStorage.delete_card_by_id(card._storage_id)
-                                if not ok then notify_error(err or _("Could not delete card")) end
+                                if not ok then
+                                    notify_error(_("No se pudo borrar la tarjeta del Kobo. No se guardaron los cambios."))
+                                    return
+                                end
                                 refresh()
                             end,
                         })

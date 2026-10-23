@@ -1,5 +1,36 @@
 # Cambios locales
 
+## Fork propio y mantenimiento (2026-10-23)
+
+Esta variante se publica en https://github.com/will-quinones/anki-flashcards-koreader,
+con `local/ux-improvements` como rama predeterminada. El remoto `origin` apunta
+al fork propio y `upstream` conserva https://github.com/lgallard/anki-flashcards-koreader.git.
+Se mantienen el historial original y las mejoras locales anteriores.
+
+Las novedades del autor se consultan con `git fetch upstream` y se integran
+en una rama de revisión, evaluando sus dependencias y las decisiones de esta
+variante: guardado explícito, menús nativos, streaming y cancelación. Antes
+de incorporar una actualización se ejecuta `python3 tests/run_tests.py` y se
+comprueba su comportamiento en el lector. Las claves y los ajustes privados
+permanecen excluidos de Git.
+
+## Streaming de Vocab y batería completa de pruebas (2026-10-23)
+
+La vista previa se abre al empezar la generación y muestra texto incremental
+con Gemini y servicios compatibles con Chat Completions. Cerrar cancela la
+petición y los reintentos; también se cancela al cerrar el libro o suspender
+KOReader. El gateway AnkiVocab conserva su respuesta completa sin incrementos.
+Regenerar está disponible en ambas caras y conserva la propuesta anterior
+si falla o se cancela. El botón local alterna Guardar/Borrar del Kobo y la
+selección original parpadea dos veces al volver a la lectura.
+
+Se completaron las simulaciones de KOReader y se actualizaron los escenarios
+antiguos a los menús y el guardado explícito actuales. Se corrigieron avisos
+incorrectos tras fallos de borrado, colisiones de nombres de imágenes y
+respuestas tardías de imágenes/audio/IPA. El ejecutor único comprueba las
+52 pruebas sin fallos ni omisiones y la sintaxis de los 36 módulos Lua.
+La validación visual de estas mejoras en el Kobo sigue pendiente.
+
 ## Botones Anki configurables en el diccionario
 
 Anki Vocab y Anki Learn se registran como botones persistentes con menu_text,
@@ -334,8 +365,9 @@ y las pruebas existentes de generación/controlador/visor.
 Instalado por SSH con sintaxis y clasificación de saturación verificadas en
 el Kobo. Se conservaron tarjetas y configuración; respaldo solo de ajustes.
 
-Esta copia conserva el historial y el remoto del repositorio original. No es
-un fork publicado en GitHub. No incluye tus claves ni `configuration.lua`.
+Esta copia conserva el historial del repositorio original. Desde el 2026-10-23
+se publica en el fork propio descrito al inicio. No incluye tus claves ni
+`configuration.lua`.
 
 ## Accesos
 

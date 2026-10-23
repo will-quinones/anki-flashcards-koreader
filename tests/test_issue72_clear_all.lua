@@ -1,5 +1,7 @@
 -- LuaJIT regression harness for Issue #72 clear-all persistence integrity.
 package.path = "./AnkiFlashcards.koplugin/?.lua;" .. package.path
+local KOReader = dofile("tests/support/koreader.lua")
+KOReader.install()
 
 local function clone_entries(entries)
     local copy = {}
@@ -59,7 +61,7 @@ do
     end
 
     local CardStorage = require("card_storage")
-    local cards_path = "/clear-all-test/anki_flashcards.json"
+    local cards_path = require("storage_paths").cards
     local first_image = "/clear-all-test/first.png"
     local second_image = "/clear-all-test/second.png"
     local function seed()
@@ -146,9 +148,8 @@ do
         return require("card_manager")
     end
     local function start_clear(manager)
-        manager.show_manage({})
-        local manage_menu = state.shown[#state.shown]
-        manage_menu.item_table[6].callback()
+        local items = manager.menu_items({})
+        KOReader.action(items, "Borrar tarjetas guardadas en el Kobo").callback()
         local confirm = state.shown[#state.shown]
         confirm.ok_callback()
     end
@@ -156,12 +157,12 @@ do
     start_clear(setup(false))
     assert(state.clear_calls == 1, "failed clear must call storage once")
     assert(state.closed == 0, "failed clear must preserve Manage menu navigation")
-    assert(state.shown[#state.shown].text == "Could not clear cards: local persistence failed",
+    assert(state.shown[#state.shown].text == "No se pudieron borrar las tarjetas del Kobo. No se guardaron los cambios.",
            "failed clear must show a local-persistence error")
 
     start_clear(setup(true))
     assert(state.clear_calls == 1, "successful clear must call storage once")
-    assert(state.closed == 1, "successful clear must close the Manage menu")
+    assert(state.closed == 0, "successful clear must preserve native Tools menu navigation")
     assert(state.shown[#state.shown].text == "All cards cleared",
            "successful clear must show success feedback")
 end

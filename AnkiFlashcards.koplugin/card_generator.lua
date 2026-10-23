@@ -1,4 +1,4 @@
--- AI flashcard generator — makes a single non-streaming LLM call and
+-- AI flashcard generator — supports regular and streaming LLM calls and
 -- returns a structured card table.
 --
 -- Supported text providers (config.text_provider):
@@ -30,13 +30,37 @@ local GEMINI_BASE_URL =
 
 -- Send a prompt to the configured LLM provider and return the text response.
 -- Returns (text, nil) or (nil, error_string).
-local function call_llm(config, prompt)
+local function call_llm(config, prompt, on_progress)
     local provider = config.text_provider or "dashscope"
     if provider ~= "gemini" and provider ~= "openai" and provider ~= "openrouter"
        and provider ~= "deepseek" and provider ~= "dashscope" then
         return nil, "Servicio de texto no reconocido. Selecciónalo en Configuración → Generación de tarjetas."
     end
     local response_body = {}
+    local stream = on_progress and require("text_stream").new(provider, on_progress)
+    local sink = stream and function(chunk) return stream:sink(chunk) end or ltn12.sink.table(response_body)
+    local function streamed(code, headers)
+        if not stream then return end
+        stream:sink(nil)
+        if tostring(code) ~= "200" then
+            return Feedback.http_error(code, table.concat(response_body), headers)
+        end
+        if stream.error then return nil, stream.error, stream.details end
+        if stream.events then
+            if stream.text == "" then return nil, "No text in streaming response" end
+            return stream.text
+        end
+        return nil, "Unexpected streaming API response format"
+    end
+    -- Retain the envelope for safe HTTP classification and providers which
+    -- return a regular response despite accepting stream=true.
+    if stream then
+        local consume = sink
+        sink = function(chunk)
+            if chunk and stream.bytes + #chunk <= 262144 then response_body[#response_body+1] = chunk end
+            return consume(chunk)
+        end
+    end
 
     if provider == "gemini" then
         local api_key = config.gemini_api_key
@@ -44,7 +68,8 @@ local function call_llm(config, prompt)
             return nil, "Gemini API key not configured"
         end
         local model = config.gemini_text_model or "gemini-2.5-flash"
-        local url = GEMINI_BASE_URL .. model .. ":generateContent?key=" .. api_key
+        local url = GEMINI_BASE_URL .. model
+            .. (stream and ":streamGenerateContent?alt=sse&key=" or ":generateContent?key=") .. api_key
         local body = json.encode({
             contents = {{ parts = {{ text = prompt }} }},
         })
@@ -57,8 +82,10 @@ local function call_llm(config, prompt)
                 ["Content-Length"] = tostring(#body),
             },
             source = ltn12.source.string(body),
-            sink   = ltn12.sink.table(response_body),
+            sink   = sink,
         })
+        if stream then stream:sink(nil) end
+        if stream and (stream.events or tostring(code) ~= "200") then return streamed(code, headers) end
         if tostring(code) ~= "200" then
             return Feedback.http_error(code, table.concat(response_body), headers)
         end
@@ -69,7 +96,7 @@ local function call_llm(config, prompt)
            and data.candidates[1].content
            and data.candidates[1].content.parts then
             for _i, part in ipairs(data.candidates[1].content.parts) do
-                if part.text then return part.text end
+                if part.text then if on_progress then on_progress(part.text) end; return part.text end
             end
         end
         return nil, "No text in Gemini response"
@@ -100,6 +127,7 @@ local function call_llm(config, prompt)
         local body = json.encode({
             model    = model,
             messages = {{ role = "user", content = prompt }},
+            stream   = on_progress and true or nil,
         })
         https.TIMEOUT = TIMEOUT
         local _, code, headers = Feedback.request(https, {
@@ -111,8 +139,10 @@ local function call_llm(config, prompt)
                 ["Content-Length"] = tostring(#body),
             },
             source = ltn12.source.string(body),
-            sink   = ltn12.sink.table(response_body),
+            sink   = sink,
         })
+        if stream then stream:sink(nil) end
+        if stream and (stream.events or tostring(code) ~= "200") then return streamed(code, headers) end
         if tostring(code) ~= "200" then
             return Feedback.http_error(code, table.concat(response_body), headers)
         end
@@ -124,7 +154,9 @@ local function call_llm(config, prompt)
            and decoded.choices
            and decoded.choices[1]
            and decoded.choices[1].message then
-            return decoded.choices[1].message.content
+            local text = decoded.choices[1].message.content
+            if on_progress and type(text) == "string" then on_progress(text) end
+            return text
         end
         return nil, "Unexpected API response format"
     end
@@ -311,13 +343,15 @@ end
 -- Generate a flashcard. Returns (card_table, nil) or (nil, error_string).
 -- card_table fields: phrase, ipa, definition, synonyms, text
 -- source/book_title/book_author are added by main.lua.
-function CardGenerator.generate(config, phrase, context, title, author)
+function CardGenerator.generate(config, phrase, context, title, author, on_progress)
     -- AnkiVocab gateway: delegate entire generation to the server.
     local provider = config.text_provider or "dashscope"
     if provider == "ankivocab" then
         local card, err, details = generate_ankivocab(config, phrase, context, title, author)
         if not card then return nil, err, details end
-        return validate_vocabulary(card)
+        local valid, validation_err = validate_vocabulary(card)
+        if valid and on_progress then on_progress(json.encode(valid)) end
+        return valid, validation_err
     end
 
     -- Use function-form replacement to prevent % in values being treated as
@@ -336,7 +370,7 @@ function CardGenerator.generate(config, phrase, context, title, author)
         :gsub("{phrase}",   function() return p end)
         :gsub("{context}",  function() return c end)
 
-    local raw_text, err, details = call_llm(config, prompt)
+    local raw_text, err, details = call_llm(config, prompt, on_progress)
     if not raw_text then return nil, err, details end
     local card, parse_err = parse_response(raw_text)
     if not card then return nil, parse_err end

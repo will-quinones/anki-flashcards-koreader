@@ -152,10 +152,16 @@ local function find_entry(entries, target)
         end
         return nil
     end
+    if type(target) == "table" and target.kind == "learn" then
+        for _, entry in ipairs(entries) do
+            if entry.kind == "learn" and entry.card_id == target.card_id then return entry end
+        end
+        return nil
+    end
     local phrase = type(target) == "table" and target.phrase or target
     local key = normalize(phrase)
     for _, entry in ipairs(entries) do
-        if normalize(entry.phrase) == key then
+        if entry.kind ~= "learn" and normalize(entry.phrase) == key then
             return entry
         end
     end
@@ -433,8 +439,9 @@ function CardStorage.replace_card(target, new_card)
     e.updated_at      = os.time()
     e.sent_to_anki    = sent_to_anki
     if not save_raw(entries) then return false, "write_failed" end
-    new_card._storage_id = e._storage_id
-    new_card.sent_to_anki = sent_to_anki
+    -- The replacement preview must retain the same confirmed Anki identity,
+    -- provenance and delivery metadata as the persisted replacement.
+    for key, value in pairs(e) do new_card[key] = value end
     -- Persistence comes first. A failed asset cleanup must not roll back or
     -- reintroduce a stale record; at worst it leaves an obsolete file.
     if old_image_path and old_image_path ~= "" and old_image_path ~= e.image_path then
@@ -526,6 +533,18 @@ function CardStorage.find_by_position(pos0, pos1)
         end
     end
     return nil
+end
+
+-- Return the persisted record of the same card type (normalized vocabulary).
+function CardStorage.saved_card(target)
+    if type(target) == "table" and target.kind == "learn" then
+        return CardStorage.find_learning_card(target.card_id)
+    end
+    local phrase = type(target) == "table" and target.phrase or target
+    local key = normalize(phrase)
+    for _, entry in ipairs(load_raw()) do
+        if entry.kind ~= "learn" and normalize(entry.phrase) == key then return entry end
+    end
 end
 
 -- Returns true if phrase is already saved (case-insensitive, trimmed).

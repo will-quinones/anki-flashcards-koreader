@@ -1,5 +1,7 @@
 -- LuaJIT regression harness for Issue #72 delete persistence integrity.
 package.path = "./AnkiFlashcards.koplugin/?.lua;" .. package.path
+local KOReader = dofile("tests/support/koreader.lua")
+KOReader.install()
 
 local function clone_entries(entries)
     local copy = {}
@@ -59,7 +61,7 @@ do
     end
 
     local CardStorage = require("card_storage")
-    local cards_path = "/delete-card-test/anki_flashcards.json"
+    local cards_path = require("storage_paths").cards
     local image_path = "/delete-card-test/card.png"
     local function seed()
         files, encoded, serial, removed = {}, {}, 0, {}
@@ -125,6 +127,7 @@ do
         package.preload["card_storage"] = function()
             return {
                 load_anki_settings = function() return nil end,
+                find_by_phrase = function() return nil end,
                 load_cards = function() return state.cards end,
                 ensure_identity = function(card) return card._storage_id ~= nil end,
                 delete_card_by_id = function(storage_id)
@@ -140,7 +143,7 @@ do
         package.preload["anki_sync"] = function() return { send_card = function() return true end } end
         package.preload["card_generator"] = function() return {} end
         package.preload["card_viewer"] = function() return {} end
-        package.preload["image_generator"] = function() return { images_enabled = function() return false end } end
+        package.preload["image_generator"] = function() return { is_enabled = function() return false end } end
         package.preload["ui/network/manager"] = function() return {} end
         package.preload["settings_viewer"] = function() return { show = function() end } end
         return require("card_manager")
@@ -157,7 +160,7 @@ do
     local function count_card_menus()
         local count = 0
         for _, widget in ipairs(state.shown) do
-            if widget.title == "My Cards (1 card (filtered))" then count = count + 1 end
+            if widget.title == "Mis tarjetas (1 de 2)" then count = count + 1 end
         end
         return count
     end
@@ -166,13 +169,13 @@ do
     assert(state.delete_calls == 1, "failed delete must call storage once")
     assert(count_card_menus() == 1, "failed delete must not refresh the card list")
     local error_widget = state.shown[#state.shown]
-    assert(error_widget.text == "Could not delete card: local persistence failed",
+    assert(error_widget.text == "No se pudo borrar la tarjeta del Kobo. No se guardaron los cambios.",
            "failed delete must show a clear local-persistence error")
 
     start_delete(setup(true))
     assert(state.delete_calls == 1, "successful delete must call storage once")
     assert(count_card_menus() == 2, "successful delete must refresh the card list")
-    assert(state.shown[#state.shown].title == "My Cards (1 card (filtered))",
+    assert(state.shown[#state.shown].title == "Mis tarjetas (1 de 2)",
            "successful delete must end on the refreshed filtered card list")
 end
 
@@ -203,6 +206,7 @@ do
     package.preload["card_storage"] = function()
         return {
             load_anki_settings = function() return nil end,
+                find_by_phrase = function() return nil end,
             load_cards = function() return { card } end,
             ensure_identity = function(target) return target._storage_id == "saved-id" end,
             update_card = function() return false end,
@@ -216,7 +220,7 @@ do
     package.preload["card_viewer"] = function()
         return { new = function(_, options) viewer_options = options; return options end }
     end
-    package.preload["image_generator"] = function() return { images_enabled = function() return false end } end
+    package.preload["image_generator"] = function() return { is_enabled = function() return false end } end
     package.preload["ui/network/manager"] = function()
         return { runWhenOnline = function(_, callback) callback() end, isOnline = function() return true end }
     end
@@ -226,7 +230,7 @@ do
     shown[#shown].item_table[2].callback()
     local initial_viewer = viewer_options
     initial_viewer.on_regen_text()
-    assert(viewer_options ~= initial_viewer and viewer_options.card.text == "old text"
+    assert(viewer_options == initial_viewer and viewer_options.card.text == "old text"
            and viewer_options.card.image_prompt == "old prompt",
            "saved-card sentence save failure must restore the original viewer state")
     assert(card.text == "old text" and card.image_prompt == "old prompt",
@@ -260,6 +264,7 @@ do
     package.preload["card_storage"] = function()
         return {
             load_anki_settings = function() return nil end,
+                find_by_phrase = function() return nil end,
             load_cards = function() return { card } end,
             ensure_identity = function(target)
                 if target._storage_id then return true end
@@ -282,7 +287,7 @@ do
     package.preload["card_viewer"] = function()
         return { new = function(_, options) viewer_options = options; return options end }
     end
-    package.preload["image_generator"] = function() return { images_enabled = function() return false end } end
+    package.preload["image_generator"] = function() return { is_enabled = function() return false end } end
     package.preload["ui/network/manager"] = function()
         return { runWhenOnline = function(_, callback) callback() end, isOnline = function() return true end }
     end
@@ -339,7 +344,8 @@ do
     }
     package.preload["card_storage"] = function()
         return {
-            load_anki_settings = function() return nil end, load_cards = function() return { card } end,
+            load_anki_settings = function() return nil end,
+                find_by_phrase = function() return nil end, load_cards = function() return { card } end,
             ensure_identity = function(target) return target._storage_id == "my-id" end,
             update_card = function() return true end, mark_sent = function() return true end,
             update_image_path = function() image_updates = image_updates + 1; return true end,
@@ -357,7 +363,7 @@ do
         end }
     end
     package.preload["image_generator"] = function()
-        return { images_enabled = function() return true end,
+        return { is_enabled = function() return true end,
                  generate_async = function(_, _, _, on_success) image_callbacks[#image_callbacks + 1] = on_success end }
     end
     package.preload["ui/network/manager"] = function() return { isOnline = function() return true end } end

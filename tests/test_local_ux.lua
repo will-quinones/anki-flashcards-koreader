@@ -33,12 +33,15 @@ end
 local status_messages = {}
 stub("ui/uimanager", { scheduleIn = function() end, show = function(_, spec)
     if spec.text then status_messages[#status_messages+1] = spec.text end
-end })
+end, close = function() end })
 stub("ui/network/manager", {runWhenOnline = function(_, callback) callback() end})
 stub("selection_context", function(_, text) return text end)
 stub("card_storage", {load_anki_settings = function() return nil end, load_cards = function() return {} end})
 for _, name in ipairs({"card_generator", "card_viewer", "anki_sync", "card_sync",
                        "highlight_inbox", "audio_generator"}) do stub(name) end
+stub("vocab_generation", {start = function()
+    status_messages[#status_messages+1] = "Generando tarjeta…"
+end, cancel_all = function() end})
 local managed, listed = 0, 0
 stub("card_manager", {
     menu_items = function() return {{text = "Send", callback = function() managed = managed + 1 end}} end,
@@ -150,8 +153,9 @@ end
 package.loaded.card_generator.generate=function() return {phrase="palabra"} end
 local preview
 package.loaded.card_viewer.new=function(_,spec) preview=spec; return spec end
-package.loaded.generation_feedback.run=function(generate,success)
-    local card=generate();if card then success(card) end
+package.loaded.vocab_generation.start=function(config, source, success)
+    local card=package.loaded.card_generator.generate(config, source.phrase, source.context, source.title, source.author)
+    if card then success(card) end
 end
 for _,enabled in ipairs({false,true}) do
     package.loaded.configuration.highlight_on_save=enabled
@@ -173,6 +177,17 @@ A.highlight_saved=function() return nil,"Highlight failed" end
 assert(preview.on_save()) -- Highlight failure must not undo a successful save.
 A.highlight_saved=original_generated
 print("PASS: Vocab highlights only after explicit successful save, never on preview or failed save; highlight errors preserve saved cards")
+
+local replaced = 0
+package.loaded.card_storage.is_saved = function() return false end
+package.loaded.card_storage.replace_card = function() replaced=replaced+1; return true end
+package.loaded.card_generator.generate = function() return {phrase="regenerated"} end
+preview.on_regenerate()
+assert(preview.card.phrase=="regenerated" and replaced==0 and #preferences==2)
+package.loaded.card_storage.is_saved = function() return true end
+preview.on_regenerate()
+assert(replaced==1 and preview.card.phrase=="regenerated" and #preferences==2)
+print("PASS: full Vocab regeneration works before Save and replaces saved cards without creating highlights")
 
 -- Optional compatibility probe against the installed native customization code.
 if arg and arg[1] then

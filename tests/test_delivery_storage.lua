@@ -81,6 +81,25 @@ assert(Storage.record_sent_guarded(pending, R.stamp(pending), {note_id = 120, de
 assert(Storage.find_by_phrase("auto-pending").sent_to_anki)
 assert(not Storage.record_sent_guarded({phrase = "deleted locally"}, "old stamp", {note_id = 121}))
 assert(not Storage.find_by_phrase("deleted locally"))
+local local_card = {phrase = "local toggle", definition = "old"}
+assert(Storage.save_card(local_card))
+local local_saved = Storage.saved_card({phrase = " LOCAL TOGGLE "})
+assert(local_saved and local_saved._storage_id == local_card._storage_id)
+local generation = {phrase = "local toggle", definition = "new"}
+assert(Storage.record_sent(local_card, {note_id = 130, deck = "Deck", model = "KOReader Vocabulary"}))
+assert(Storage.replace_card(local_card, generation))
+assert(generation._storage_id ~= local_card._storage_id and generation.anki_note_id == 130 and generation.sent_to_anki)
+assert(not Storage.delete_card_by_id(local_card._storage_id)) -- stale confirmation
+failure = true
+assert(not Storage.delete_card_by_id(generation._storage_id) and Storage.is_saved(generation))
+failure = false
+assert(Storage.delete_card_by_id(generation._storage_id) and not Storage.is_saved(generation))
+assert(Storage.save_card(generation) and Storage.is_saved(generation))
+assert(Storage.saved_card(learning).kind == "learn")
+local learning_saved = Storage.saved_card(learning)
+assert(Storage.ensure_identity(learning_saved))
+assert(Storage.delete_card_by_id(learning_saved._storage_id))
+assert(not Storage.is_saved(learning) and Storage.is_saved("palabra"))
 io.open, os.rename, os.remove = real_open, real_rename, real_remove
 print("PASS: individual sends persist receipts, reconcile saved notes and preserve data on failure")
 print("PASS: imports match IDs, preserve phrase conflicts and handle persistence failures")

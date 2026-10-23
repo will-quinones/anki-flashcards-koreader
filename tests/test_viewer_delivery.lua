@@ -1,6 +1,7 @@
 -- luajit tests/test_viewer_delivery.lua -- shared actions on both card sides.
 local widget = {new = function(_, spec) return spec end}
 for _, name in ipairs({"ui/bidi", "ui/widget/buttondialog", "ui/widget/buttontable",
+    "ui/widget/confirmbox",
     "ui/widget/container/centercontainer", "ui/font", "ui/widget/container/framecontainer",
     "ui/geometry", "ui/gesturerange", "ui/widget/imagewidget", "ui/widget/infomessage",
     "ui/widget/inputdialog", "ui/widget/container/movablecontainer", "ui/widget/notification",
@@ -13,12 +14,16 @@ package.loaded.device = {screen = {}}
 package.loaded["ffi/blitbuffer"] = {ColorRGB32 = function() return {} end}
 package.loaded.gettext = function(s) return s end
 local saved, notice = false, nil
-package.loaded.card_storage = {is_saved = function() return saved end}
+package.loaded.card_storage = {is_saved = function() return saved end,
+    saved_card = function() return {_storage_id = "local-1"} end,
+    ensure_identity = function() return true end,
+    delete_card_by_id = function(id) assert(id == "local-1"); saved = false; return true end}
 package.loaded["ui/uimanager"] = {show = function(_, spec) notice = spec.text end}
 local Viewer = dofile("AnkiFlashcards.koplugin/card_viewer.lua")
 for _, back in ipairs({false, true}) do
     saved = false
     local button = {setText = function(self, text) self.text = text end,
+        enable = function(self) self.disabled = false end,
         disable = function(self) self.disabled = true end, refresh = function() end}
     local saves, sends = 0, 0
     local viewer = setmetatable({show_back = back, card = {phrase = "palabra"},
@@ -30,11 +35,11 @@ for _, back in ipairs({false, true}) do
     assert(#actions == 2 and actions[1].id == "save" and actions[2].id == "send")
     assert(actions[1].enabled and actions[2].enabled)
     actions[1].callback()
-    assert(saves == 1 and button.disabled and viewer.show_back == back)
+    assert(saves == 1 and not button.disabled and button.text == "Borrar del Kobo…" and viewer.show_back == back)
     button.disabled, saved = false, false
     actions[2].callback()
     assert(sends == 1 and button.disabled and viewer.show_back == back)
-    assert(viewer:delivery_buttons()[1].enabled == false)
+    assert(viewer:delivery_buttons()[1].enabled == true)
     viewer.on_send = function() return nil, "connection refused" end
     saved, button.disabled = false, false
     viewer:delivery_buttons()[2].callback()
@@ -111,3 +116,25 @@ for _, back in ipairs({false, true}) do
     assert(viewer.show_back == back)
 end
 print("PASS: live Send/Delete button on both sides, confirmation, external deletion, offline and no action reversal")
+
+local confirmation, updates = nil, 0
+package.loaded["ui/uimanager"].show = function(_, spec) confirmation = spec end
+local btn = {setText = function(self, text) self.text = text end, refresh = function() end,
+    enable = function() end, disable = function() end}
+local viewer = setmetatable({card = {phrase = "word"}, on_save = function() saved = true; return true end,
+    button_table = {getButtonById = function() return btn end}, update = function() updates = updates + 1 end}, {__index = Viewer})
+saved = true
+local action = viewer:delivery_buttons()[1]
+assert(action.enabled and action.text == "Borrar del Kobo…")
+action.callback()
+assert(saved and confirmation.ok_callback) -- Cancellation preserves the card.
+confirmation.ok_callback()
+assert(not saved and btn.text == "Guardar" and updates == 1)
+viewer:delivery_buttons()[1].callback()
+assert(saved and btn.text == "Borrar del Kobo…")
+saved = true -- External deletion: tapping Delete cannot turn into Save.
+action = viewer:delivery_buttons()[1]
+saved = false
+action.callback()
+assert(not saved and btn.text == "Guardar")
+print("PASS: local Save/Delete toggles, confirms deletion, allows saving again and rechecks external changes")

@@ -28,6 +28,9 @@ local Feedback         = require("generation_feedback")
 local Recovery         = require("anki_recovery")
 local HighlightMenu    = require("highlight_menu")
 local Annotations      = require("annotation_tools")
+local VocabGeneration  = require("vocab_generation")
+local ReadingMarker    = require("reading_marker")
+local CardMedia        = require("card_media")
 
 local MAX_HL    = 2000
 local MAX_TITLE = 100
@@ -335,6 +338,7 @@ function AnkiFlashcards:init()
                 -- Highlighted text, position, and surrounding context.
                 local sel = rhi.selected_text
                 local annotation_snapshot = Annotations.capture(ui, sel)
+                ReadingMarker.clear(ui)
                 local existing_card = Annotations.find_card(annotation_snapshot, "vocab", CardStorage.load_cards())
                 if existing_card then
                     Annotations.bind(existing_card, annotation_snapshot)
@@ -381,6 +385,11 @@ function AnkiFlashcards:init()
 
                     -- viewer_ref[1] always holds the currently visible CardViewer.
                     local viewer_ref = {}
+                    local function media_callback(c, kind, callback)
+                        return CardMedia.wrap(c, kind, callback, function()
+                            return viewer_ref[1] ~= nil and viewer_ref[1].card == c
+                        end)
+                    end
 
                     -- make_viewer creates a CardViewer for card c.
                     -- show_back=false → front (question) side.
@@ -394,17 +403,25 @@ function AnkiFlashcards:init()
                             on_add_highlight = annotation_actions.on_add_highlight,
                             is_highlighted = annotation_actions.is_highlighted,
                             can_add_highlight = annotation_actions.can_add_highlight,
+                            on_dismiss = function()
+                                CardMedia.invalidate(c)
+                                viewer_ref[1] = nil
+                                ReadingMarker.flash(ui, annotation_snapshot)
+                            end,
 
                             on_show_answer = function()
                                 -- Close whichever viewer is currently showing
                                 -- (may differ from v after an async update).
                                 local cur = viewer_ref[1] or v
+                                cur._replacing = true
                                 UIManager:close(cur)
                                 local nv = make_viewer(c, true)
                                 viewer_ref[1] = nv
                             end,
                             on_show_question = function()
-                                UIManager:close(viewer_ref[1] or v)
+                                local cur = viewer_ref[1] or v
+                                cur._replacing = true
+                                UIManager:close(cur)
                                 viewer_ref[1] = make_viewer(c, false)
                             end,
                             on_viewer_updated = function(updated) viewer_ref[1] = updated end,
@@ -426,10 +443,13 @@ function AnkiFlashcards:init()
                             end,
 
                             on_prepare_update = function(editing_card)
-                                return CardStorage.ensure_identity(editing_card)
+                                return not CardStorage.is_saved(editing_card) or CardStorage.ensure_identity(editing_card)
                             end,
                             on_update = function(updated_card)
-                                return CardStorage.update_card(c, updated_card)
+                                if not CardStorage.is_saved(c) then CardMedia.invalidate(c); return true end
+                                local ok, err = CardStorage.update_card(c, updated_card)
+                                if ok then CardMedia.invalidate(c) end
+                                return ok, err
                             end,
 
                             on_send = function()
@@ -439,16 +459,18 @@ function AnkiFlashcards:init()
 
                             on_regenerate = function()
                                 NetworkMgr:runWhenOnline(function()
-                                    Feedback.run(function()
-                                        return CardGenerator.generate(CONFIGURATION, phrase, context, title, author)
-                                    end, function(new_card)
-                                        new_card.source         = cambridge_url(new_card.phrase)
+                                    if not viewer_ref[1] or viewer_ref[1]._anki_closed then return end
+                                    VocabGeneration.start(CONFIGURATION, {phrase = phrase, context = context, title = title, author = author}, function(new_card)
+                                        new_card.source         = new_card.source or cambridge_url(new_card.phrase)
                                         new_card.book_title     = title
                                         new_card.book_author    = author
                                         new_card.highlight_pos0 = highlight_pos0
                                         new_card.highlight_pos1 = highlight_pos1
                                         Annotations.bind(new_card, annotation_snapshot)
-                                        local replaced, replace_err = CardStorage.replace_card(c, new_card)
+                                        local replaced, replace_err = true, nil
+                                        if CardStorage.is_saved(c) then
+                                            replaced, replace_err = CardStorage.replace_card(c, new_card)
+                                        end
                                         if not replaced then
                                             UIManager:show(InfoMessage:new {
                                                 text = replace_err == "already_saved"
@@ -459,15 +481,18 @@ function AnkiFlashcards:init()
                                             return
                                         end
                                         -- Regenerated card starts on front again.
-                                        if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
+                                        CardMedia.invalidate(c)
+                                        if viewer_ref[1] then viewer_ref[1]._replacing = true; UIManager:close(viewer_ref[1]) end
                                         viewer_ref[1] = make_viewer(new_card, false)
-                                        if new_card.image_prompt then
+                                        local regen_image_config = make_image_config(new_card)
+                                        new_card._image_url = nil
+                                        if can_generate_image(new_card, regen_image_config) then
                                             ImageGenerator.generate_async(
-                                                CONFIGURATION, new_card.image_prompt, new_card.phrase,
-                                                function(img_path)
+                                                regen_image_config, new_card.image_prompt, new_card.phrase,
+                                                media_callback(new_card, "image", function(img_path)
                                                     local old_image = new_card.image_path
                                                     new_card.image_path = img_path
-                                                    if not CardStorage.update_image_path(new_card, img_path) then
+                                                    if new_card._storage_id and not CardStorage.update_image_path(new_card, img_path) then
                                                         new_card.image_path = old_image
                                                         CardStorage.remove_image_if_unreferenced(img_path)
                                                         UIManager:show(InfoMessage:new {
@@ -476,11 +501,20 @@ function AnkiFlashcards:init()
                                                         return
                                                     end
                                                     if Feedback.is_top(viewer_ref[1]) then viewer_ref[1] = viewer_ref[1]:update(new_card) end
-                                                end,
+                                                end),
                                                 nil  -- image errors are non-fatal
                                             )
                                         end
-                                    end, nil, {label = Feedback.REGENERATING})
+                                        if new_card._audio_status == "pending" and new_card._ankivocab_word then
+                                            AudioGenerator.poll_ankivocab_async(CONFIGURATION, new_card._ankivocab_word,
+                                                media_callback(new_card, "audio", function(url)
+                                                    new_card._audio_url = url
+                                                    if new_card._storage_id then CardStorage.update_audio_url(new_card, url) end
+                                                end), nil)
+                                        end
+                                    end, {regenerating = true, is_valid = function()
+                                        return Annotations.same_book(ui, annotation_snapshot) and viewer_ref[1] ~= nil
+                                    end})
                                 end)
                             end,
 
@@ -500,7 +534,8 @@ function AnkiFlashcards:init()
                                             return
                                         end
                                         copy_card_into(c, candidate)
-                                        if viewer_ref[1] then UIManager:close(viewer_ref[1]) end
+                                        CardMedia.invalidate(c)
+                                        if viewer_ref[1] then viewer_ref[1]._replacing = true; UIManager:close(viewer_ref[1]) end
                                         viewer_ref[1] = make_viewer(c, true)
                                         -- Kick off image generation with new prompt.
                                         if new_prompt then
@@ -508,7 +543,7 @@ function AnkiFlashcards:init()
                                                 CONFIGURATION,
                                                 new_prompt,
                                                 c.phrase,
-                                                function(img_path)
+                                                media_callback(c, "image", function(img_path)
                                                     local old_image = c.image_path
                                                     c.image_path = img_path
                                                     local image_saved = CardStorage.update_image_path(c, img_path)
@@ -526,7 +561,7 @@ function AnkiFlashcards:init()
                                                     if Feedback.is_top(viewer_ref[1]) then
                                                         viewer_ref[1] = viewer_ref[1]:update(c)
                                                     end
-                                                end,
+                                                end),
                                                 nil
                                             )
                                         end
@@ -551,7 +586,7 @@ function AnkiFlashcards:init()
                                     CONFIGURATION,
                                     c.image_prompt,
                                     c.phrase,
-                                    function(img_path)
+                                    media_callback(c, "image", function(img_path)
                                         c.image_path = img_path
                                         local saved = CardStorage.update_image_path(c, img_path)
                                         if not saved and c._storage_id then
@@ -573,7 +608,7 @@ function AnkiFlashcards:init()
                                             text    = _("New image loaded!"),
                                             timeout = 3,
                                         })
-                                    end,
+                                    end),
                                     function(err)
                                         UIManager:show(InfoMessage:new {
                                             text    = _("Imagen: ") .. Feedback.image_message(err),
@@ -599,10 +634,10 @@ function AnkiFlashcards:init()
                             img_config,
                             card.image_prompt,
                             card.phrase,
-                            function(img_path)
+                            media_callback(card, "image", function(img_path)
                                 local old_image = card.image_path
                                 card.image_path = img_path
-                                if not CardStorage.update_image_path(card, img_path) then
+                                if card._storage_id and not CardStorage.update_image_path(card, img_path) then
                                     card.image_path = old_image
                                     CardStorage.remove_image_if_unreferenced(img_path)
                                     UIManager:show(InfoMessage:new {
@@ -615,7 +650,7 @@ function AnkiFlashcards:init()
                                     local nv = viewer_ref[1]:update(card)
                                     viewer_ref[1] = nv
                                 end
-                            end,
+                            end),
                             nil  -- image errors are non-fatal
                         )
                     end
@@ -627,19 +662,21 @@ function AnkiFlashcards:init()
                         AudioGenerator.poll_ankivocab_async(
                             CONFIGURATION,
                             card._ankivocab_word,
-                            function(audio_url)
+                            media_callback(card, "audio", function(audio_url)
                                 card._audio_url = audio_url
-                                CardStorage.update_audio_url(card, audio_url)
-                            end,
+                                if card._storage_id then CardStorage.update_audio_url(card, audio_url) end
+                            end),
                             nil  -- audio polling errors are non-fatal
                         )
                     end
                 end
 
                 NetworkMgr:runWhenOnline(function()
-                    Feedback.run(function()
-                        return CardGenerator.generate(CONFIGURATION, phrase, context, title, author)
-                    end, on_generated)
+                    if not Annotations.same_book(ui, annotation_snapshot) then return end
+                    VocabGeneration.start(CONFIGURATION, {phrase = phrase, context = context, title = title, author = author},
+                        on_generated, {is_valid = function() return Annotations.same_book(ui, annotation_snapshot) end,
+                            on_cancel = function() ReadingMarker.flash(ui, annotation_snapshot) end,
+                            on_failure = function() ReadingMarker.flash(ui, annotation_snapshot) end})
                 end)
             end,
         }
@@ -805,6 +842,8 @@ function AnkiFlashcards:init()
 end
 
 function AnkiFlashcards:onCloseDocument()
+    VocabGeneration.cancel_all()
+    ReadingMarker.clear(self.ui)
     self._auto_send_resume = false
     if self._auto_send then self._auto_send:stop() end
 end
@@ -812,6 +851,8 @@ function AnkiFlashcards:onExit()
     self:onCloseDocument()
 end
 function AnkiFlashcards:onSuspend()
+    VocabGeneration.cancel_all()
+    ReadingMarker.clear(self.ui)
     self._auto_send_resume = self._auto_send and self._auto_send.running
     if self._auto_send then self._auto_send:stop() end
 end

@@ -1,5 +1,10 @@
 # AnkiFlashcards para KOReader
 
+Variante mantenida en [will-quinones/anki-flashcards-koreader](https://github.com/will-quinones/anki-flashcards-koreader),
+fork de [lgallard/anki-flashcards-koreader](https://github.com/lgallard/anki-flashcards-koreader).
+La rama predeterminada del fork es `local/ux-improvements`. En esta copia,
+`origin` apunta al fork y `upstream` al repositorio del autor original.
+
 Genera tarjetas mientras lees y envíalas a Anki. Esta versión incorpora dos
 acciones, sin perfiles ni modos predeterminados:
 
@@ -124,11 +129,21 @@ al elegir explícitamente la acción Anki correspondiente.
 1. Abre un libro y selecciona una palabra, expresión o fragmento.
 2. Elige **Anki Vocab** o **Anki Learn**. Ambos aparecen en el diálogo de
    selección y en el diccionario de palabras individuales cuando la API es compatible.
-3. Revisa la propuesta. Para Learn, seleccionar una frase o párrafo suele
+3. Revisa la propuesta. **Anki Vocab abre la tarjeta al iniciar la generación**
+   y muestra el contenido conforme llega por streaming. Mientras se genera,
+   puedes cancelar con **Cerrar**, la X, el botón de volver o tocando fuera del
+   modal. Se detiene la petición y cualquier reintento pendiente; el contenido
+   incompleto no se guarda. Para Learn, seleccionar una frase o párrafo suele
    ser más útil que seleccionar una palabra aislada.
 4. **Mostrar respuesta** revela el reverso y **Mostrar pregunta** vuelve al
-   anverso sin regenerar contenido. **Guardar** y el botón dinámico de Anki
-   están disponibles en ambas caras: **Enviar a Anki** si la nota no existe,
+   anverso sin regenerar contenido. **Regenerar** está disponible en ambas
+   caras de Vocab, también en tarjetas guardadas, y vuelve a generar la tarjeta
+   completa con streaming. Si falla o cancelas, se conserva la versión anterior.
+   El botón local alterna entre **Guardar** y **Borrar del Kobo…** según si la
+   tarjeta está guardada. El borrado pide confirmación y permite volver a
+   guardarla; conserva el subrayado y la nota de Anki.
+   El botón dinámico de Anki también está disponible en ambas caras:
+   **Enviar a Anki** si la nota no existe,
    **Eliminar de Anki…** si ya existe. El borrado siempre pide confirmación y
    conserva la copia local. Sin conexión o con un origen no verificable aparece
    **Verificar en Anki**, sin asumir que la nota falta. Se comprueba al abrir
@@ -158,6 +173,20 @@ al elegir explícitamente la acción Anki correspondiente.
    distinguir **Eliminar del Kobo…** de **Eliminar de Anki…**. El borrado remoto
    exige la API de AnkiConnect con protección de sesión; si no está disponible,
    se rechaza y se indica que se elimine desde Anki. No hay borrado remoto automático.
+
+Al cerrar una tarjeta Vocab abierta desde la lectura, la selección original
+parpadea dos veces para ayudarte a retomarla. No crea subrayados ni cambia de
+página; solo se muestra si la selección corresponde al libro y la vista actuales.
+Cambiar de cara, regenerar o recibir una imagen no activa el parpadeo.
+
+El streaming de texto usa Gemini o servicios compatibles con Chat Completions
+(OpenAI, OpenRouter, DeepSeek y DashScope). AnkiVocab Gateway devuelve la tarjeta
+completa desde su servidor: el modal se abre y permite cancelar igualmente,
+pero ese servicio no ofrece texto incremental mediante el endpoint integrado.
+La interfaz y los botones definitivos aparecen después de validar la respuesta.
+Las peticiones se ejecutan en un proceso separado y se cancelan también al
+cerrar el libro o suspender KOReader. Las actualizaciones del modal se limitan
+para evitar refrescos continuos en pantallas de tinta electrónica.
 
 El idioma controla la tarjeta completa, no solo la traducción de una
 definición. Para tarjetas monolingües en español, usa `Spanish` y texto en español.
@@ -462,9 +491,22 @@ y facturación son independientes. No se activa automáticamente.
 ## Desarrollo y pruebas
 
 ```sh
-for test in tests/test_*.lua; do luajit "$test" || exit 1; done
-python3 -m pytest -q
+python3 tests/run_tests.py
 ```
+
+El ejecutor necesita Python 3 y LuaJIT, sin dependencias Python adicionales.
+Descubre todas las pruebas Lua y Python, ejecuta cada caso en un proceso
+separado, informa los fallos y comprueba la sintaxis de los módulos Lua.
+No omite las pruebas antiguas ni necesita una instalación de KOReader.
+
+Las simulaciones compartidas de `tests/support/koreader.lua` proporcionan los
+límites de KOReader: archivos virtuales, widgets, medidas de texto, pantalla,
+eventos y transporte de red. Las pruebas conservan los módulos reales de
+almacenamiento y control que comprueban; los accesos de red no preparados
+fallan. Los casos antiguos usan las acciones nativas actuales y el guardado
+explícito de vistas previas. Las pruebas de migración comprueban por separado
+las rutas reales. El aspecto y los refrescos físicos de tinta electrónica
+requieren comprobación en el lector.
 
 Las pruebas no necesitan claves reales. [LOCAL_CHANGES.md](LOCAL_CHANGES.md)
 describe los cambios de esta copia respecto al proyecto original.

@@ -9,7 +9,7 @@ package.loaded["ui/uimanager"] = {show = function(_, spec) shown[#shown+1] = spe
     scheduleIn = function(_, _, fn) queue[#queue+1] = fn end}
 package.loaded.card_storage = {load_cards = function() return saved end,
     load_anki_settings = function() return nil end,
-    save_card = function(card) saved[#saved+1] = card; return true end}
+    save_card = function(card) card._storage_id = "saved-" .. (#saved+1); saved[#saved+1] = card; return true end}
 package.loaded.image_generator = {is_enabled = function() return false end}
 package.loaded.card_generator = {generate = function(_, phrase)
     calls = calls + 1

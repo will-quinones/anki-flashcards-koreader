@@ -1,5 +1,7 @@
 -- Focused LuaJIT harness for issue #10 card export behavior.
 package.path = "./AnkiFlashcards.koplugin/?.lua;" .. package.path
+local KOReader = dofile("tests/support/koreader.lua")
+KOReader.install()
 
 package.preload["datastorage"] = function()
     return { getDataDir = function() return "/tmp" end }
@@ -244,12 +246,11 @@ package.preload["settings_viewer"] = function() return { show = function() end }
 
 local CardManager = require("card_manager")
 local function export_menu()
-    CardManager.show_manage({}, { ui = { document = { getProps = function()
+    local manage = {item_table = CardManager.menu_items({}, { ui = { document = { getProps = function()
         return { title = "Book A" }
-    end } } })
-    local manage = ui_state.shown[#ui_state.shown]
+    end } } })}
     for _, item in ipairs(manage.item_table) do
-        if item.text == "Export Cards" then
+        if item.text == "Exportar tarjetas" then
             item.callback()
             return ui_state.shown[#ui_state.shown]
         end
@@ -305,7 +306,7 @@ assert(collision_phrases["titled unknown"] and collision_phrases["untitled"],
 ui_state.cards = {}
 local shown_before = #ui_state.shown
 export_menu()
-assert(#ui_state.exports == 4 and #ui_state.shown == shown_before + 2
+assert(#ui_state.exports == 4 and #ui_state.shown == shown_before + 1
        and ui_state.shown[#ui_state.shown].text == "No cards to export",
        "zero-card export must notify without creating an export")
 

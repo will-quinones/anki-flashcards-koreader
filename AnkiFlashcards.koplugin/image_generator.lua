@@ -24,6 +24,7 @@ local IMAGE_DIR = Paths.images
 
 local ImageGenerator = {}
 local pending = {}
+local image_serial = 0
 function ImageGenerator.is_pending(phrase)
     return (pending[phrase or ""] or 0) > 0
 end
@@ -38,7 +39,8 @@ end
 -- Build a unique filename from the phrase + timestamp.
 local function make_save_path(phrase)
     local safe = (phrase or "card"):lower():gsub("[^%w%-%_]", "_"):sub(1, 40)
-    return IMAGE_DIR .. "/" .. safe .. "_" .. os.time() .. ".png"
+    image_serial = image_serial + 1
+    return IMAGE_DIR .. "/" .. safe .. "_" .. os.time() .. "_" .. image_serial .. ".png"
 end
 
 -- Download URL to a local file, returning (true) or (false, err).

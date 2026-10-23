@@ -79,6 +79,8 @@ local CardViewer = InputContainer:extend {
     on_save        = nil,   -- function() -> true | nil, err
     on_send        = nil,   -- function() -> true | nil, err
     on_regenerate  = nil,   -- function()
+    on_dismiss     = nil,   -- function() — real close only, never an internal redraw
+    generating     = false,
     on_prepare_update = nil, -- function(card) -> true | false; bind stable identity before edits
     on_update      = nil,   -- function(card) — called after a field edit (to persist)
     on_regen_ipa   = nil,   -- function(new_phrase, card, new_viewer) — async IPA regen after phrase change
@@ -129,15 +131,27 @@ function CardViewer:anki_action()
     elseif self.on_send then
         local ok, err = self.on_send()
         self:refresh_anki_status()
-        local save = self.button_table and self.button_table:getButtonById("save")
-        if ok and save then save:setText(_("✓ Guardada"), save.width); save:disable(); save:refresh() end
+        self:refresh_local_status()
         UIManager:show(InfoMessage:new {text = ok and _("Enviada a Anki.") or (err or _("No se pudo enviar."))})
     end
+end
+
+function CardViewer:refresh_local_status()
+    local saved = not not (self.card and require("card_storage").is_saved(self.card))
+    self._local_saved = saved
+    local button = self.button_table and self.button_table:getButtonById("save")
+    if button then
+        button:setText(saved and _("Borrar del Kobo…") or _("Guardar"), button.width)
+        if saved or self.on_save then button:enable() else button:disable() end
+        button:refresh()
+    end
+    return saved
 end
 
 function CardViewer:delivery_buttons()
     local CardStorage = require("card_storage")
     local already_saved = self.card and CardStorage.is_saved(self.card)
+    self._local_saved = not not already_saved
     local function sent()
         return self.card and self.card.sent_to_anki and self.card.anki_note_id ~= nil
     end
@@ -149,24 +163,39 @@ function CardViewer:delivery_buttons()
         if self.card and self.card.anki_sync_state == "missing" then return _("No está en Anki") end
         return sent() and _("✓ Enviada a Anki") or _("Enviar a Anki")
     end
-    local function update_saved_button()
-        local button = self.button_table and self.button_table:getButtonById("save")
-        if button then
-            button:setText(_("✓ Guardada"), button.width)
-            button:disable()
-            button:refresh()
-        end
-    end
     local buttons = {
         {
             id = "save",
-            text = already_saved and _("✓ Guardada") or _("Guardar"),
-            enabled = not already_saved and self.on_save ~= nil,
+            text = already_saved and _("Borrar del Kobo…") or _("Guardar"),
+            enabled = already_saved or self.on_save ~= nil,
             callback = function()
+                local intended = self._local_saved
+                local saved = self:refresh_local_status()
+                if saved ~= intended then return end -- never reverse the intended action
+                if saved then
+                    -- Capture the durable record now; confirmation cannot delete
+                    -- a different generation which happens to have the same phrase.
+                    local target = CardStorage.saved_card(self.card)
+                    if not target or not CardStorage.ensure_identity(target) then return end
+                    UIManager:show(require("ui/widget/confirmbox"):new {
+                        text = _("¿Borrar esta tarjeta del Kobo? Se conserva la nota de Anki y el subrayado del libro."),
+                        ok_text = _("Borrar del Kobo"),
+                        ok_callback = function()
+                            if self._anki_closed then return end
+                            local ok = CardStorage.delete_card_by_id(target._storage_id)
+                            if ok then
+                                self.card.image_path = ""
+                                self:refresh_local_status()
+                                self:update()
+                            else UIManager:show(InfoMessage:new {text = _("No se pudo borrar la tarjeta del Kobo."), timeout = 5}) end
+                        end,
+                    })
+                    return
+                end
                 if not self.on_save then return end
                 local ok, err = self.on_save()
                 if ok then
-                    update_saved_button()
+                    self:refresh_local_status()
                     UIManager:show(Notification:new {text = _("Guardada en el Kobo.")})
                 else
                     UIManager:show(InfoMessage:new {text = err or _("No se pudo guardar."), timeout = 5})
@@ -189,7 +218,7 @@ function CardViewer:delivery_buttons()
                 if ok then
                     -- Sending also persists the card locally. Reflect that on
                     -- either side without closing or flipping the viewer.
-                    if self.card and CardStorage.is_saved(self.card) then update_saved_button() end
+                    self:refresh_local_status()
                     local button = self.button_table and self.button_table:getButtonById("send")
                     if button then
                         button:setText(_("✓ Enviada a Anki"), button.width)
@@ -256,7 +285,7 @@ function CardViewer:init()
     -- ── Button row ────────────────────────────────────────────────────────────
     local buttons_row = {}
     local extras_row = {}
-    table.insert(buttons_row, {
+    if not self.generating then table.insert(buttons_row, {
         id = "flip",
         text = self.show_back and _("Mostrar pregunta") or _("Mostrar respuesta"),
         callback = function()
@@ -264,20 +293,16 @@ function CardViewer:init()
             if self.show_back then callback = self.on_show_question end
             if callback then callback() else self:update(nil, not self.show_back) end
         end,
-    })
+    }) end
     table.insert(buttons_row, {text = _("Cerrar"), callback = function() self:onClose() end})
-    if self.show_back then
+    if not self.generating and not self.read_only and self.on_regenerate then
+        table.insert(buttons_row, {id = "regenerate", text = _("Regenerar"), callback = function() self.on_regenerate() end})
+    end
+    if self.show_back and not self.generating then
         if not self.read_only then
             table.insert(extras_row, {
                 text     = _("Editar"),
                 callback = function() self:showEditDialog() end,
-            })
-        end
-
-        if not self.read_only and self.on_regenerate then
-            table.insert(extras_row, {
-                text     = _("Regenerar"),
-                callback = function() self.on_regenerate() end,
             })
         end
 
@@ -294,7 +319,7 @@ function CardViewer:init()
             self:onClose(); self.on_highlight_dialog()
         end})
     end
-    local rows = {self:delivery_buttons(), buttons_row}
+    local rows = self.generating and {buttons_row} or {self:delivery_buttons(), buttons_row}
     if #extras_row > 0 then rows[#rows+1] = extras_row end
     self.button_table = ButtonTable:new {
         width       = self.width - 2 * self.button_padding,
@@ -390,7 +415,12 @@ function CardViewer:init()
 
     local big_gap = gap * 3  -- visible separator before cloze sentence
 
-    if self.card and self.card.kind == "learn" then
+    if self.generating then
+        local text = (self.generation_label or _("Generando tarjeta…")) .. "\n\n" .. (self.stream_text or "")
+        local text_widget = make_text(text, Font:getFace("smallinfofont"), avail_h, nil, "left")
+        self.scroll_text_w = text_widget
+        content_widget = VerticalGroup:new {text_widget}
+    elseif self.card and self.card.kind == "learn" then
         local c = self.card
         local face = Font:getFace("smallinfofont")
         local text = c.question or ""
@@ -636,6 +666,7 @@ function CardViewer:update(new_card, new_show_back)
     local card      = new_card or self.card
     local show_back = new_show_back
     if show_back == nil then show_back = self.show_back end
+    self._replacing = true
     UIManager:close(self)
     local updated = CardViewer:new {
         card                  = card,
@@ -644,6 +675,10 @@ function CardViewer:update(new_card, new_show_back)
         on_show_question      = self.on_show_question,
         on_viewer_updated     = self.on_viewer_updated,
         on_save               = self.on_save,
+        on_dismiss            = self.on_dismiss,
+        generating            = self.generating,
+        generation_label      = self.generation_label,
+        stream_text           = self.stream_text,
         on_send               = self.on_send,
         anki_base             = self.anki_base,
         on_regenerate         = self.on_regenerate,
@@ -668,6 +703,10 @@ end
 
 function CardViewer:onCloseWidget()
     self._anki_closed = true
+    if not self._replacing and not self._dismissed then
+        self._dismissed = true
+        if self.on_dismiss then self.on_dismiss() end
+    end
     UIManager:setDirty(nil, function()
         return "partial", self.frame.dimen
     end)
@@ -678,7 +717,8 @@ function CardViewer:onShow()
     UIManager:setDirty(self, function()
         return "partial", self.frame.dimen
     end)
-    if self.anki_base then
+    if not self.generating then self:refresh_local_status() end
+    if self.anki_base and not self.generating then
         UIManager:scheduleIn(0, function()
             if not self._anki_closed then self:refresh_anki_status() end
         end)
