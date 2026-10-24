@@ -17,7 +17,7 @@ older sections may describe menus that have since been retired.
   compact toolbar accessible through Editar subrayado for boundary editing.
 - Annotation-list generation is Learn-only. Preserve pagination, fixed-width
   checkbox/action columns, native context and source validation.
-- Vocab generation uses a cancellable streaming modal. Closing, suspend and
+- Vocab and Learn generation share a cancellable streaming modal. Closing, suspend and
   document teardown cancel work and pending retries. Never save partial output.
 - Save is explicit. Sending to Anki and confirmed annotation batches may also
   persist cards. Do not restore automatic saving on preview or regeneration of
@@ -51,6 +51,9 @@ older sections may describe menus that have since been retired.
   All Lua/Python cases and Lua syntax checks must pass without skipped cases.
 - Use test credentials and simulated services. Do not send cards, contact paid
   generation APIs or change real collections while running local tests.
+- Native regressions run through `python3 tests/device/run_native.py --host <IP>`.
+  They use offscreen buffers, a synthetic book and a temporary local TLS service;
+  they must never initialize the hardware framebuffer or load real API keys.
 - Keep configuration.lua, anki_flashcards_settings.json, their temporary files,
   and generated user data out of commits and deployment packages.
 - Device installation and visual validation are separate tasks. Do not deploy

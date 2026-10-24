@@ -3,6 +3,10 @@
 local json = require("json")
 local Worker = {}
 local serial = 0
+local logger_ok, logger = pcall(require, "logger")
+local function trace(phase, count)
+    if logger_ok then logger.info("Anki generation worker:", phase, count or "") end
+end
 local function write(path, value)
     local file = io.open(path .. ".tmp", "w")
     if not file then return false end
@@ -11,7 +15,8 @@ local function write(path, value)
     if not ok or not closed then os.remove(path .. ".tmp"); return false end
     return os.rename(path .. ".tmp", path)
 end
-function Worker.launch(config, source)
+function Worker.launch(config, source, kind)
+    trace("prepare")
     local util = require("ffi/util")
     for _, name in ipairs({"runInSubProcess", "isSubProcessDone", "terminateSubProcess"}) do
         if type(util[name]) ~= "function" then return nil, "El lector no admite generación en segundo plano." end
@@ -20,23 +25,36 @@ function Worker.launch(config, source)
     local ready, err = Paths.initialize()
     if not ready then return nil, err end
     serial = serial + 1
-    local path = Paths.runtime .. "/vocab-generation-" .. os.time() .. "-" .. serial .. "-" .. math.random(2147483646) .. ".json"
+    local path = Paths.runtime .. "/card-generation-" .. os.time() .. "-" .. serial .. "-" .. math.random(2147483646) .. ".json"
     local pid = util.runInSubProcess(function()
+        trace("child:started")
         local last = 0
-        local ok, card, reason, details = pcall(require("card_generator").generate,
-            config, source.phrase, source.context, source.title, source.author, function(raw)
-                local now = util.gettime and util.gettime() or os.time()
-                if now - last >= 0.15 then
-                    write(path, {kind = "progress", raw = raw})
-                    last = now
-                end
-            end)
-        if ok and card then write(path, {kind = "complete", card = card})
+        local function progress(raw)
+            local now = util.gettime and util.gettime() or os.time()
+            if now - last >= 0.15 then
+                if last == 0 then trace("child:first-progress", #raw) end
+                write(path, {kind = "progress", raw = raw})
+                last = now
+            end
+        end
+        local Generator = require("card_generator")
+        local ok, card, reason, details
+        if kind == "learn" then
+            ok, card, reason, details = pcall(Generator.generate_learning, config, source, progress)
         else
+            ok, card, reason, details = pcall(Generator.generate,
+                config, source.phrase, source.context, source.title, source.author, progress)
+        end
+        if ok and card then trace("child:complete"); write(path, {kind = "complete", card = card})
+        else
+            trace("child:error")
             local info = require("generation_feedback").classify(ok and reason or nil, ok and details or nil)
+            trace("child:http-status", tonumber(info.status) or 0)
+            trace(info.retryable and "child:retryable" or "child:not-retryable")
             write(path, {kind = "error", info = info})
         end
     end, false)
+    trace("fork:returned", pid and tonumber(pid) or 0)
     if not pid then return nil, "No se pudo iniciar la generación." end
     local job = {pid = pid, started = os.time()}
     function job:clear()

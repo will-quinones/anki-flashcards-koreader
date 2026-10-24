@@ -135,11 +135,12 @@ al elegir explícitamente la acción Anki correspondiente.
 1. Abre un libro y selecciona una palabra, expresión o fragmento.
 2. Elige **Anki Vocab** o **Anki Learn**. Ambos aparecen en el diálogo de
    selección y en el diccionario de palabras individuales cuando la API es compatible.
-3. Revisa la propuesta. **Anki Vocab abre la tarjeta al iniciar la generación**
+3. Revisa la propuesta. **Anki Vocab y Anki Learn abren la tarjeta al iniciar la generación**
    y muestra el contenido conforme llega por streaming. Mientras se genera,
    puedes cancelar con **Cerrar**, la X, el botón de volver o tocando fuera del
    modal. Se detiene la petición y cualquier reintento pendiente; el contenido
-   incompleto no se guarda. Para Learn, seleccionar una frase o párrafo suele
+   incompleto no se guarda. Learn muestra la pregunta mientras se genera y
+   conserva la respuesta oculta hasta **Mostrar respuesta**. Para Learn, seleccionar una frase o párrafo suele
    ser más útil que seleccionar una palabra aislada.
 4. **Mostrar respuesta** revela el reverso y **Mostrar pregunta** vuelve al
    anverso sin regenerar contenido. **Regenerar** está disponible en ambas

@@ -1,12 +1,17 @@
 -- Briefly invert only the source text. This view module never changes the
 -- reader's selection, annotations, current page or document rendering state.
 local Marker = {}
+local logger_ok, logger = pcall(require, "logger")
+local function trace(phase)
+    if logger_ok then logger.info("Anki reading marker:", phase) end
+end
 function Marker.clear(ui)
     local view = ui and ui.view
     local marker = view and view.view_modules and view.view_modules.ankivocab_return
     if marker then marker:finish() end
 end
 function Marker.flash(ui, snapshot)
+    trace("prepare")
     local A = require("annotation_tools")
     if not ui or not A.same_book(ui, snapshot) or not A.valid_range(snapshot.selection) then return end
     local view, selection = ui.view, snapshot.selection
@@ -17,6 +22,7 @@ function Marker.flash(ui, snapshot)
     local page, pos, zoom, rotation = state.page, state.pos, state.zoom, state.rotation
     local boxes = {}
     local ok = pcall(function()
+        trace("boxes:query")
         if type(selection.pos0) == "string" then
             boxes = ui.document:getScreenBoxesFromPositions(selection.pos0, selection.pos1, true) or {}
         else
@@ -30,6 +36,7 @@ function Marker.flash(ui, snapshot)
             end
         end
     end)
+    trace("boxes:ready")
     if not ok or #boxes == 0 then return end
     local marker = {visible = false, ticks = 0}
     local function valid()
@@ -46,12 +53,14 @@ function Marker.flash(ui, snapshot)
     end
     function marker:paintTo(bb)
         if not self.visible or not valid() then return end
+        trace("paint:start")
         local width, height = bb:getWidth(), bb:getHeight()
         for _, rect in ipairs(boxes) do
             local x, y = math.max(0, rect.x), math.max(0, rect.y)
             local w, h = math.min(width, rect.x + rect.w) - x, math.min(height, rect.y + rect.h) - y
             if w > 0 and h > 0 then bb:invertRect(x, y, w, h) end
         end
+        trace("paint:done")
     end
     marker.tick = function()
         if marker.finished then return end

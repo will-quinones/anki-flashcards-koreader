@@ -1,5 +1,29 @@
 # Cambios locales
 
+## Generación compartida y diagnóstico nativo (2026-10-23)
+
+Learn y Vocab comparten streaming en segundo plano, cancelación al cerrar y
+regeneración. Learn mantiene oculta la respuesta durante el progreso y parpadea
+la selección original al cerrar la tarjeta; los cambios de cara no disparan ese
+parpadeo. La actualización incremental modifica el texto del mismo widget y
+mantiene sus controles, sin cerrar y reconstruir el modal en cada fragmento.
+
+Un intento real de Vocab completó la generación; otros terminaron sin un código
+HTTP válido y se clasificaban como errores definitivos del servicio. Ahora esas
+interrupciones de transporte tienen un reintento acotado, cancelable, sin guardar
+salidas parciales ni mostrar cuerpos de error, claves o textos en el diagnóstico.
+Los dos cierres anteriores aparecen en crash.log como segmentation faults sin
+traza Lua; su causa exacta no queda confirmada por ese registro. Los escenarios
+nativos aislados no los reprodujeron, por lo que no se atribuyen a un componente
+concreto ni se declaran resueltos solo por pasar las simulaciones.
+
+La batería local completa pasa 55/55 casos y la sintaxis de 36 módulos. El nuevo
+ejecutor tests/device/run_native.py también comprueba las 41 pruebas Lua en el
+Kobo y usa widgets, fuentes, búferes de color, motor de lectura, subprocesos y
+TLS reales con datos sintéticos. Comprueba el reintento tras un error de
+transporte, el streaming Learn sin revelar la respuesta y la cancelación real.
+No usa el framebuffer físico, claves reales, servicios de pago ni colecciones.
+
 ## Actualización selectiva desde upstream (2026-10-23)
 
 Revisado upstream hasta `e452539`, incorporando la función de `ff68843` para

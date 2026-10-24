@@ -379,7 +379,7 @@ end
 
 -- A separate action, not a global mode. One focused question grounded in
 -- the actual book text. No image/TTS requests or vocabulary transformations.
-function CardGenerator.generate_learning(config, source)
+function CardGenerator.generate_learning(config, source, on_progress)
     if config.text_provider == "ankivocab" then
         return nil, "Anki Learn necesita Gemini, OpenRouter, OpenAI, DeepSeek o DashScope. AnkiVocab solo genera vocabulario."
     end
@@ -408,7 +408,7 @@ Otherwise return ONLY valid JSON:
 BOOK_DATA:
 ]]
     prompt = prompt:gsub("LANGUAGE", function() return config.target_language or "English" end) .. payload
-    local raw, err, details = call_llm(config, prompt)
+    local raw, err, details = call_llm(config, prompt, on_progress)
     if not raw then return nil, err, details end
     local data, parse_err = parse_response(raw)
     if not data then return nil, parse_err end

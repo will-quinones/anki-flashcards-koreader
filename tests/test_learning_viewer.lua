@@ -75,3 +75,24 @@ assert(dismissed==0 and updated.generating and updated.stream_text=="partial")
 updated:onClose(); updated:onCloseWidget()
 assert(dismissed==1)
 print("PASS: Regenerate on both sides, close-only streaming modal, redraw preserves state and real close dismisses exactly once")
+
+local paints, text_updates, scroll_updates = 0, 0, 0
+UI.setDirty=function() paints=paints+1 end
+local stable=Viewer:new {card={},generating=true,stream_text="",generation_label="Generando tarjeta…"}
+stable.scroll_text_w.text_widget={setText=function(_,text)
+    text_updates=text_updates+1
+    assert(text:find("new content",1,true) or text:find("Reintentando",1,true))
+end}
+stable.scroll_text_w.updateScrollBar=function() scroll_updates=scroll_updates+1 end
+local before=dismissed
+stable:update_generation("new content")
+assert(text_updates==1 and scroll_updates==1 and paints==1 and not stable._anki_closed and dismissed==before)
+stable:update_generation("new content")
+assert(text_updates==1 and paints==1, "unchanged visible text must not repaint")
+stable:update_generation("", "Reintentando conexión…")
+assert(text_updates==2 and scroll_updates==2 and stable.generation_label=="Reintentando conexión…")
+stable:onClose()
+local after=text_updates
+stable:update_generation("late content")
+assert(text_updates==after, "dismissed generation must reject late native text updates")
+print("PASS: incremental text updates keep one native modal, avoid redundant repaints and ignore late progress")

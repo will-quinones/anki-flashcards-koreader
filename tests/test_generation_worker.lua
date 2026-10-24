@@ -57,6 +57,16 @@ assert(event.kind == "error" and not event.info.message:find("synthetic-secret",
 done = false
 job = assert(Worker.launch({}, {})); clock = clock+91
 assert(job:poll().info.kind == "timeout" and kills == 2 and next(files) == nil)
+done = false
+package.loaded.card_generator.generate_learning = function(config, source, progress)
+    assert(source.selected == "synthetic idea")
+    progress('{"question":"Question"')
+    assert(job:poll().kind == "progress")
+    return {kind = "learn", question = "Question", answer = "Answer"}
+end
+job = assert(Worker.launch({}, {selected="synthetic idea"}, "learn"))
+execute(); done = true
+assert(job:poll().card.kind == "learn" and next(files) == nil)
 pid = nil
 assert(not Worker.launch({}, {}))
 io.open, os.remove, os.rename, os.time = real_open, real_remove, real_rename, real_time

@@ -58,3 +58,22 @@ assert(embedded.kind == "busy" and embedded.retryable)
 assert(not Feedback.classify("Gemini error: https://example.com?key=private-key").message:find("private-key", 1, true))
 assert(Feedback.image_message("Gemini API key not configured"):find("Extras", 1, true))
 print("PASS: transport/embedded provider errors are safe; batch mode can handle failures without popup spam")
+
+for _, code in ipairs({"wantread", "wantwrite", "unexpected eof while reading", "invalid transport private-key", false, 0}) do
+    reset(); calls = 0
+    Feedback.run(function()
+        calls = calls + 1
+        if calls == 1 then return Feedback.http_error(code, "private-key response body") end
+        return {phrase = "ready"}
+    end, function() end)
+    drain()
+    assert(calls == 2, "transport failures must get one bounded retry")
+    local _, _, info = Feedback.http_error(code, "private-key response body")
+    assert(info.kind == "network" and info.transport_error and info.retryable and not info.status)
+    assert(not info.message:find("private-key", 1, true))
+end
+local _, _, timeout = Feedback.http_error("timeout", "private-key")
+assert(timeout.kind == "timeout" and timeout.transport_error and timeout.retryable)
+local _, _, missing = Feedback.http_error(nil, "private-key")
+assert(missing.kind == "network" and missing.transport_error and missing.retryable)
+print("PASS: non-HTTP transport errors retry once and never expose private data")

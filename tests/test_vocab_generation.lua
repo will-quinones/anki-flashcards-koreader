@@ -11,18 +11,20 @@ end
 package.loaded["ui/uimanager"] = UI
 package.loaded.gettext = function(s) return s end
 package.loaded["ui/widget/infomessage"] = {new=function(_,v) return v end}
-package.loaded.text_stream = {preview = function(raw) return {definition=raw} end}
+package.loaded.text_stream = {preview = function(raw)
+    return {definition=raw, question="visible question", answer="hidden answer", evidence="hidden evidence"}
+end}
 local Viewer = {}
 function Viewer:new(spec) return setmetatable(spec, {__index=self}) end
-function Viewer:update()
-    self._replacing = true; UI:close(self)
-    local updated = Viewer:new {generating=self.generating, stream_text=self.stream_text,
-        generation_label=self.generation_label, on_dismiss=self.on_dismiss, on_viewer_updated=self.on_viewer_updated}
-    UI:show(updated); self.on_viewer_updated(updated); return updated
+function Viewer:update() error("Streaming must not replace the native modal") end
+function Viewer:update_generation(text, label)
+    assert(not self._anki_closed)
+    self.stream_text, self.generation_label = text, label or self.generation_label
 end
 package.loaded.card_viewer = Viewer
-local events
-package.loaded.generation_worker = {launch = function()
+local events, last_kind
+package.loaded.generation_worker = {launch = function(_, _, kind)
+    last_kind = kind
     launches = launches+1
     return {poll = function() return table.remove(events,1) end,
         cancel = function() cancels=cancels+1 end}
@@ -66,3 +68,19 @@ events={{kind="error",info={kind="auth",retryable=false,message="safe error"}}}
 start(); drain()
 assert(current.text=="safe error" and successes==2)
 print("PASS: modal opens before requests, streams, preserves callbacks, cancels queued/in-flight work, bounds retries and handles teardown")
+
+events={{kind="progress",raw="partial"},{kind="complete",card={phrase="done"}}}
+start({kind="learn"})
+local modal, shown_before = current, #shown
+step(); step()
+assert(last_kind=="learn" and current==modal and #shown==shown_before and modal.card.kind=="learn")
+assert(current.stream_text=="visible question" and not current.stream_text:find("hidden",1,true))
+step(); assert(successes==3)
+local _, _, interrupted = require("generation_feedback").http_error("wantread", "private error")
+events={{kind="error",info=interrupted}}
+start(); step(); step()
+assert(current.generation_label=="Reintentando conexión…")
+local before=launches
+UI:close(current); drain()
+assert(launches==before, "closing a transport retry must cancel its queued request")
+print("PASS: Learn shares streaming/cancellation, keeps its answer hidden and retains the same native modal")

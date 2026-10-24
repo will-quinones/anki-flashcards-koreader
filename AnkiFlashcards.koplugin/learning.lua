@@ -1,6 +1,5 @@
 local Context = require("learning_context")
 local Learn = require("learning_card")
-local Generator = require("card_generator")
 local Storage = require("card_storage")
 local State = require("settings_state")
 local AnkiSync = require("anki_sync")
@@ -8,8 +7,9 @@ local Viewer = require("card_viewer")
 local UIManager = require("ui/uimanager")
 local NetworkMgr = require("ui/network/manager")
 local InfoMessage = require("ui/widget/infomessage")
-local Feedback = require("generation_feedback")
 local Annotations = require("annotation_tools")
+local Generation = require("vocab_generation")
+local Marker = require("reading_marker")
 local Learning = {}
 local function message(text) UIManager:show(InfoMessage:new {text = text}) end
 
@@ -21,9 +21,13 @@ function Learning.show(base, card, ui)
         viewer = Viewer:new {
             anki_base = base,
             card = card, show_back = back or false, read_only = card.sent_to_anki == true,
-            on_show_answer = function() if current then UIManager:close(current) end; open(true) end,
-            on_show_question = function() if current then UIManager:close(current) end; open(false) end,
+            on_show_answer = function() if current then current._replacing = true; UIManager:close(current) end; open(true) end,
+            on_show_question = function() if current then current._replacing = true; UIManager:close(current) end; open(false) end,
             on_viewer_updated = function(updated) current = updated end,
+            on_dismiss = function()
+                current = nil
+                Marker.flash(ui, card.annotation_source)
+            end,
             on_add_highlight = annotation_actions.on_add_highlight,
             is_highlighted = annotation_actions.is_highlighted,
             can_add_highlight = annotation_actions.can_add_highlight,
@@ -57,20 +61,21 @@ function Learning.show(base, card, ui)
                     reader_note = card.reader_note,
                     pos0 = card.highlight_pos0, pos1 = card.highlight_pos1}
                 NetworkMgr:runWhenOnline(function()
-                    Feedback.run(function()
-                        local cfg = State.merge(base, Storage.load_anki_settings())
-                        return Generator.generate_learning(cfg, source)
-                    end, function(candidate)
+                    if not current or current._anki_closed then return end
+                    local cfg = State.merge(base, Storage.load_anki_settings())
+                    Generation.start(cfg, source, function(candidate)
                         candidate.card_id = card.card_id
                         Annotations.bind(candidate, card.annotation_source)
                         if Storage.find_learning_card(card.card_id) then
                             local ok, save_err = Storage.save_learning_card(candidate, true)
                             if not ok then message(save_err); return end
                         end
-                        if current then UIManager:close(current) end
+                        if current then current._replacing = true; UIManager:close(current) end
                         card = candidate
                         open(false)
-                    end, nil, {label = Feedback.REGENERATING})
+                    end, {kind = "learn", regenerating = true, is_valid = function()
+                        return current ~= nil and not (ui and ui.tearing_down)
+                    end})
                 end)
             end or nil,
         }
@@ -85,6 +90,7 @@ function Learning.start(base, ui, selection)
     local source, err = Context.capture(ui, selection)
     if not source then message(err); return end
     local snapshot = Annotations.capture(ui, selection)
+    Marker.clear(ui)
     local existing = Storage.find_learning_card(Learn.id(source))
     if existing then
         Annotations.bind(existing, snapshot)
@@ -100,10 +106,13 @@ function Learning.start(base, ui, selection)
     -- selection. The scheduled request uses this immutable source snapshot.
     if ui.highlight then ui.highlight:onClose() end
     NetworkMgr:runWhenOnline(function()
-        Feedback.run(function() return Generator.generate_learning(cfg, source) end, function(card)
+        Generation.start(cfg, source, function(card)
             Annotations.bind(card, snapshot)
             Learning.show(base, card, ui)
-        end)
+        end, {kind = "learn", is_valid = function()
+            return not ui.tearing_down and (not ui.document or Annotations.same_book(ui, snapshot))
+        end, on_cancel = function() Marker.flash(ui, snapshot) end,
+            on_failure = function() Marker.flash(ui, snapshot) end})
     end)
 end
 return Learning

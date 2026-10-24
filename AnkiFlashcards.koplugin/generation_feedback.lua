@@ -79,7 +79,20 @@ function Feedback.is_top(widget)
     return widget ~= nil and type(UI.getTopmostVisibleWidget) == "function" and UI:getTopmostVisibleWidget() == widget
 end
 function Feedback.http_error(code, body, headers)
-    local info = Feedback.classify("HTTP " .. tostring(code) .. ": " .. tostring(body or ""))
+    local status = tonumber(code)
+    local info
+    if status and status >= 100 and status <= 599 and status % 1 == 0 then
+        info = Feedback.classify("HTTP " .. tostring(status) .. ": " .. tostring(body or ""))
+    else
+        -- LuaSec may return a transport error (including wantread or TLS EOF)
+        -- instead of an HTTP status. Treat it as an interrupted connection,
+        -- never as a permanent provider rejection or a successful partial card.
+        info = Feedback.classify(type(code) == "string" and code or "request_failed")
+        if info.kind ~= "timeout" then
+            info = {kind = "network", message = "Se interrumpió la conexión con el servicio. Comprueba el Wi-Fi y reintenta.", retryable = true}
+        end
+        info.transport_error = true
+    end
     local header = type(headers) == "table" and (headers["retry-after"] or headers["Retry-After"])
     local delay = header and tonumber(header)
     local body_delay = type(body) == "string" and tonumber(body:match('"retryDelay"%s*:%s*"([%d%.]+)s"'))

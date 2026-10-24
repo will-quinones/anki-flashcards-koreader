@@ -660,6 +660,21 @@ end
 
 -- ── Update (close+recreate) ───────────────────────────────────────────────────
 
+-- Streaming changes text inside the existing native widget. Rebuilding the
+-- complete modal on every delta needlessly closes/frees its native resources
+-- and replaces the controls while the user may be dismissing it.
+function CardViewer:update_generation(text, label)
+    if self._anki_closed or not self.generating then return end
+    text, label = text or "", label or self.generation_label or _("Generando tarjeta…")
+    if text == self.stream_text and label == self.generation_label then return end
+    self.stream_text, self.generation_label = text, label
+    local content = PTF_HEADER .. label .. "\n\n" .. text
+    self.scroll_text_w.text = content
+    self.scroll_text_w.text_widget:setText(content)
+    self.scroll_text_w:updateScrollBar()
+    UIManager:setDirty(self, function() return "partial", self.frame.dimen end)
+end
+
 -- Closes this viewer and opens a fresh one with the (possibly updated) card.
 -- Preserves show_back state unless new_show_back is explicitly passed.
 function CardViewer:update(new_card, new_show_back)
