@@ -31,6 +31,11 @@ older sections may describe menus that have since been retired.
 - Configuration uses settings_state.lua for normalization and migration.
   Private settings stay inside the plugin; cards/media/runtime stay under
   settings/ankiflashcards/. Never overwrite keys or drop migration support.
+- Model lists retain manual model entry. Keep thinking/effort independent per
+  provider and send only compatible controls through ai_configuration.lua in
+  every generation path. Default settings must preserve the service defaults.
+  Provider summaries never reveal credentials; document catalog sources and
+  review dates in docs/AI_PROVIDERS.md when changing model capabilities.
 
 ## Upstream integration
 

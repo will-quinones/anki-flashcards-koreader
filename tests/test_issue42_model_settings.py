@@ -34,7 +34,7 @@ def test_image_generators_use_configurable_model_names():
 
     assert 'config.image_model or "qwen-image-plus"' in image_generator
     assert 'config.gemini_image_model or "gemini-3.1-flash-image"' in image_generator
-    assert 'config.openai_image_model or "gpt-image-1"' in image_generator
+    assert 'config.openai_image_model or "gpt-image-1.5"' in image_generator
     assert 'config.openrouter_image_model or "google/gemini-3.1-flash-image-preview"' in image_generator
 
 
@@ -61,6 +61,7 @@ def test_legacy_custom_anki_model_migrates_without_overriding_text_model():
     assert 'clean.settings_version = 2' in state
 
     result = subprocess.run(["luajit", "-"], cwd=ROOT, text=True, capture_output=True, input=r'''
+package.path = "AnkiFlashcards.koplugin/?.lua;" .. package.path
 local State = dofile("AnkiFlashcards.koplugin/settings_state.lua")
 local base = {model = "my-text-model", image_provider = "gemini", anki = {deck = "Old deck"}}
 local saved = {model = "My custom note type", target_language = "Spanish", image_provider = "", gemini_api_key = ""}

@@ -165,6 +165,42 @@ UI:scheduleIn(0.7,function() UI:close(modal) end)
 run_until(function() return cancelled==1 and #tasks==0 end)
 assert(cancelled==1)
 Generation.cancel_all()
+
+-- Actual settings widgets and summaries, backed only by synthetic memory.
+local saved_settings
+package.loaded.card_storage = {load_anki_settings=function() return saved_settings end,
+    save_anki_settings=function(value) saved_settings=value; return true end}
+package.loaded.anki_sync,package.loaded.card_sync={},{}
+local Settings=require("settings_viewer")
+local AI=require("ai_configuration")
+local base={text_provider="deepseek",deepseek_api_key="synthetic-secret",anki={}}
+local root_menu=Settings.menu_items(base)
+local function item(items,prefix)
+    for _,value in ipairs(items) do
+        local label=value.text_func and value.text_func() or value.text
+        if label:sub(1,#prefix)==prefix then return value end
+    end
+    error("Missing native setting: "..prefix)
+end
+local generation=item(root_menu,"Generación de tarjetas").sub_item_table_func()
+local menu_stub={updateItems=function() end}
+for _,id in ipairs({"deepseek","gemini","openai","dashscope","openrouter"}) do
+    local choices=item(generation,"Servicio:").sub_item_table_func()
+    local labels={deepseek="DeepSeek",gemini="Google Gemini",openai="OpenAI",dashscope="Qwen",openrouter="OpenRouter"}
+    item(choices,labels[id]).callback(menu_stub)
+    local account=item(generation,"Cuenta y modelo").sub_item_table_func()
+    local models=item(account,"Modelo de IA:").sub_item_table_func()
+    item(models,AI.models[id][1]).callback(menu_stub)
+    item(item(account,"Thinking:").sub_item_table_func(),"Activado").callback(menu_stub)
+    item(item(account,"Esfuerzo:").sub_item_table_func(),"Bajo").callback(menu_stub)
+    item(account,"Ver configuración de este proveedor").callback(menu_stub)
+    assert(visible and not visible.text:find("synthetic-secret",1,true))
+    UI:close(visible)
+    assert(saved_settings[AI.fields[id].key]==AI.models[id][1])
+    assert(saved_settings[id.."_thinking"]=="on" and saved_settings[id.."_reasoning_effort"]=="low")
+end
+assert(saved_settings.deepseek_api_key=="synthetic-secret")
+print("NATIVE_AI_SETTINGS_PASS")
 doc:close()
 screen.bb:free()
 print("NATIVE_CANCELLATION_PASS")

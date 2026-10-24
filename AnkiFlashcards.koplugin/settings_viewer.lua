@@ -8,6 +8,7 @@ local Storage = require("card_storage")
 local AnkiSync = require("anki_sync")
 local CardSync = require("card_sync")
 local State = require("settings_state")
+local AI = require("ai_configuration")
 local _ = require("gettext")
 local Settings = {}
 
@@ -25,7 +26,7 @@ local PROVIDERS = {
         image_model = {key = "image_model", default = "qwen-image-plus"}},
     openai = {name = "OpenAI", key = "openai_api_key", website = "platform.openai.com/api-keys",
         text_model = {key = "openai_model", default = "gpt-4o-mini"},
-        image_model = {key = "openai_image_model", default = "gpt-image-1"}},
+        image_model = {key = "openai_image_model", default = "gpt-image-1.5"}},
     ankivocab = {name = "AnkiVocab", key = "ankivocab_api_key", website = "ankivocab.com"},
     pollinations = {name = "Pollinations (experimental)"},
     none = {name = "Sin imágenes"},
@@ -125,26 +126,93 @@ function Settings.menu_items(base, on_saved, ui)
         end
         return items
     end
+    local function model_choices(category)
+        local p, id = chosen(category)
+        local field = p[category .. "_model"]
+        if not field then return {} end
+        local items = {action(_("Escribir modelo…"), function()
+            edit(_("Modelo personalizado de ") .. p.name, field.key, field.default, function(value)
+                return AI.validate_model(value, field.default, id)
+            end, cfg[field.key] or field.default)
+        end)}
+        for _i, model in ipairs(AI.choices(id, category, cfg[field.key] or field.default, field.default)) do
+            local value = model
+            local item = action(value .. (value == field.default and _(" (predeterminado)") or ""), function()
+                save({[field.key] = value})
+            end)
+            item.checked_func = function() return (cfg[field.key] or field.default) == value end
+            items[#items+1] = item
+        end
+        return items
+    end
+    local function thinking_choices()
+        local id = select(2, chosen("text"))
+        local current = AI.current(cfg, id)
+        local items, modes = {}, {"auto", "on"}
+        if current.caps.can_disable then modes[#modes+1] = "off" end
+        for _i, mode in ipairs(modes) do
+            local value = mode
+            local item = action(_(AI.mode_names[value]), function()
+                local patch = {[id .. "_thinking"] = value}
+                if value == "auto" then patch[id .. "_reasoning_effort"] = "auto" end
+                save(patch)
+            end)
+            item.checked_func = function() return AI.current(cfg, id).mode == value end
+            items[#items+1] = item
+        end
+        return items
+    end
+    local function effort_choices()
+        local id = select(2, chosen("text"))
+        local efforts, items = {"auto"}, {}
+        for _i, effort in ipairs(AI.current(cfg, id).caps.efforts) do efforts[#efforts+1] = effort end
+        for _i, effort in ipairs(efforts) do
+            local value = effort
+            local item = action(_(AI.effort_names[value]), function()
+                local patch = {[id .. "_reasoning_effort"] = value}
+                if value ~= "auto" then patch[id .. "_thinking"] = "on" end
+                save(patch)
+            end)
+            item.checked_func = function() return AI.current(cfg, id).effort == value end
+            items[#items+1] = item
+        end
+        return items
+    end
+    local function provider_summary(id)
+        local p = PROVIDERS[id]
+        local text = p.name .. (cfg.text_provider == id and _(" · activo para Vocab y Learn") or "")
+        if id == "ankivocab" and cfg.text_provider == id then text = p.name .. _(" · activo solo para Vocab") end
+        if p.text_model then text = text .. _("\nModelo de texto: ") .. AI.model(cfg, id) end
+        if id == "pollinations" then
+            text = text .. _("\nSolo imágenes. Modelo gestionado por el servicio, sin controles de razonamiento del texto.")
+            if cfg.image_provider == id then text = text .. _("\nActivo para las imágenes de Vocab.") end
+        else text = text .. "\n" .. _(AI.description(cfg, id)) end
+        if p.image_model then
+            local field = p.image_model
+            text = text .. _("\n\nModelo de imágenes: ") .. (cfg[field.key] or field.default)
+            text = text .. (cfg.image_provider == id and _(" · activo para Vocab") or _(" · inactivo"))
+        end
+        if p.key then text = text .. _("\n\nClave API: ") .. (State.has_key(cfg[p.key] or (id == "dashscope" and cfg.api_key)) and _("guardada") or _("falta añadirla")) end
+        if id == "ankivocab" and cfg.image_provider == id then text = text .. _("\nImágenes gestionadas por AnkiVocab · activo para Vocab.") end
+        message(text)
+    end
     local function account(category)
-        return {
+        local items = {
             action(function()
-                local p = chosen(category)
-                local status = p.key and (State.has_key(cfg[p.key]) and _("guardada") or _("falta añadirla")) or _("no necesaria")
+                local p, id = chosen(category)
+                local status = p.key and (State.has_key(cfg[p.key] or (id == "dashscope" and cfg.api_key)) and _("guardada") or _("falta añadirla")) or _("no necesaria")
                 return _("Clave API: ") .. status
             end, function()
                 local p = chosen(category)
                 if p.key then edit(p.name .. _(" · clave API"), p.key, p.website, nil, nil, true) end
             end, function() return chosen(category).key ~= nil end),
-            action(function()
+            submenu(function()
                 local p = chosen(category)
                 local field = p[category .. "_model"]
                 return field and (_("Modelo de IA: ") .. (cfg[field.key] or field.default))
                     or _("Modelo gestionado por el servicio")
-            end, function()
-                local field = chosen(category)[category .. "_model"]
-                if field then edit(_("Identificador del modelo de IA"), field.key, field.default,
-                    function(value) return value ~= "" and value or field.default end) end
-            end, function() return chosen(category)[category .. "_model"] ~= nil end),
+            end, function() return model_choices(category) end,
+                function() return chosen(category)[category .. "_model"] ~= nil end),
             action(_("Clave compartida y costes"), function()
                 local p, id = chosen(category)
                 local text = _("La clave se comparte entre texto e imágenes si eliges el mismo servicio. No tienes que crear otra clave ni volver a introducirla.\n\nLos costes dependen del modelo y de tu cuenta; el complemento no activa facturación ni compra créditos.")
@@ -153,6 +221,25 @@ function Settings.menu_items(base, on_saved, ui)
                 message(text)
             end),
         }
+        items[2].help_text = _("Elige un modelo de la lista incluida o usa Escribir modelo… para uno personalizado. La disponibilidad depende de tu cuenta y región.")
+        if category == "text" then
+            table.insert(items, 3, submenu(function()
+                local current = AI.current(cfg, select(2, chosen("text")))
+                return _("Thinking: ") .. (current.caps.style == "none" and _("gestionado por el modelo") or _(AI.mode_names[current.mode]))
+            end, thinking_choices, function() return AI.current(cfg, select(2, chosen("text"))).caps.style ~= "none" end))
+            table.insert(items, 4, submenu(function()
+                local current = AI.current(cfg, select(2, chosen("text")))
+                return _("Esfuerzo: ") .. (current.caps.style == "none" and _("no configurable")
+                    or current.mode == "off" and _("no se aplica") or _(AI.effort_label(current)))
+            end, effort_choices, function()
+                local current = AI.current(cfg, select(2, chosen("text")))
+                return current.caps.style ~= "none" and current.mode ~= "off"
+            end))
+            items[#items+1] = action(_("Ver configuración de este proveedor"), function()
+                provider_summary(select(2, chosen("text")))
+            end)
+        end
+        return items
     end
     local function connection()
         return {
@@ -254,6 +341,17 @@ function Settings.menu_items(base, on_saved, ui)
         return {
             submenu(function() return _("Servicio: ") .. chosen("text").name end, function() return provider_choices("text") end),
             submenu(_("Cuenta y modelo de IA"), function() return account("text") end),
+            submenu(_("Ver configuración de proveedores"), function()
+                local items = {}
+                for _i, provider in ipairs(AI.providers) do
+                    local id = provider
+                    items[#items+1] = action(function()
+                        return PROVIDERS[id].name .. (cfg.text_provider == id and _(" · activo") or "")
+                    end, function() provider_summary(id) end)
+                end
+                items[#items+1] = action(_("Pollinations · imágenes"), function() provider_summary("pollinations") end)
+                return items
+            end),
             auto_highlight,
             submenu(function()
                 local label = cfg.target_language or "English"

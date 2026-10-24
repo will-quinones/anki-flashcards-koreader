@@ -1,5 +1,6 @@
 -- Shared configuration rules. No UI dependencies or network requests.
 local State = {}
+local AI = require("ai_configuration")
 local OPTIONAL_VALUES = {"model", "image_model", "gemini_text_model", "gemini_image_model", "openai_model",
     "openai_image_model", "openrouter_model", "openrouter_image_model", "deepseek_model",
     "text_provider", "target_language",
@@ -32,7 +33,7 @@ function State.merge(base, saved)
     cfg.highlight_on_generate = nil -- Preserve the previous checkbox preference, not its trigger.
     for _, key in ipairs({"split_card_types", "auto_send_wifi", "tts_enabled", "cloud_auto_sync", "highlight_on_save"}) do cfg[key] = cfg[key] == true end
     if type(cfg.sync_server) ~= "table" then cfg.sync_server = nil end
-    return cfg
+    return AI.normalize(cfg)
 end
 
 function State.apply(base, cfg)
@@ -61,7 +62,7 @@ function State.persistable(cfg)
     local clean = {}
     for k, v in pairs(cfg) do if k ~= "anki_model" and k ~= "anki" then clean[k] = v end end
     clean.settings_version = 2 -- 'model' is now always an AI model, never a note type.
-    return clean
+    return AI.normalize(clean)
 end
 
 function State.book_parent(cfg)

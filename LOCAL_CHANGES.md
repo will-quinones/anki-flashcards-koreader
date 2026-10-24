@@ -1,5 +1,29 @@
 # Cambios locales
 
+## Modelos y razonamiento por proveedor (2026-10-23)
+
+Cuenta y modelo de IA permite elegir modelos de una lista sin conexión o escribir
+un identificador personalizado. Se conservan modelos guardados que no estén en
+el catálogo. Cada servicio mantiene su modelo, thinking y esfuerzo de forma
+independiente. Ver configuración de proveedores permite consultar también los
+inactivos sin mostrar claves. Las cuentas de imágenes usan el mismo selector;
+AnkiVocab y Pollinations mantienen su modelo gestionado por el servicio.
+
+Los controles se adaptan al modelo y se traducen a las API de Gemini, OpenAI,
+OpenRouter, DeepSeek y Qwen. Solo se ofrecen niveles compatibles; los modelos
+que no admiten apagado no lo muestran. Los ajustes se aplican a Vocab, Learn y
+regeneración, incluyendo SSE interno para modelos Qwen que lo necesitan aunque
+la operación no tenga vista incremental. El razonamiento permanece oculto.
+El modelo de imágenes OpenAI por defecto pasa a gpt-image-1.5 conservando los
+modelos explícitos existentes. docs/AI_PROVIDERS.md documenta fuentes y límites.
+
+La batería local pasa 59/59 casos, sin omisiones, y la sintaxis de 37 módulos.
+Se prueban persistencia por proveedor, parámetros efectivos en las peticiones,
+listas y entrada manual, compatibilidad, resúmenes sin claves y fallos de guardado.
+En el Kobo pasan las 44 pruebas Lua y los escenarios nativos, incluyendo los
+nuevos ajustes con resúmenes renderizados mediante widgets reales y datos
+sintéticos, además del streaming lento, reintento y cancelación.
+
 ## Más margen para el primer fragmento (2026-10-23)
 
 Tras comprobar generaciones reales de Vocab y Learn, quedó un fallo aislado

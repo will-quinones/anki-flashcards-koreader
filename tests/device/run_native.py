@@ -148,7 +148,7 @@ cd {shlex.quote(args.koreader)}
         for line in result.stdout.splitlines():
             if "NATIVE_" in line or "DEVICE_LUA_TESTS_PASS_" in line:
                 print(line, flush=True)
-        expected = {"NATIVE_IN_PLACE_RENDER_PASS", "NATIVE_TRANSPORT_RETRY_PASS", "NATIVE_DELAYED_FIRST_BYTE_PASS",
+        expected = {"NATIVE_IN_PLACE_RENDER_PASS", "NATIVE_TRANSPORT_RETRY_PASS", "NATIVE_DELAYED_FIRST_BYTE_PASS", "NATIVE_AI_SETTINGS_PASS",
                     "NATIVE_LEARN_STREAMING_PASS", "NATIVE_CANCELLATION_PASS"}
         assert expected.issubset(set(result.stdout.splitlines()))
         return 0

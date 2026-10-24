@@ -1,4 +1,5 @@
 -- luajit tests/test_friendly_settings.lua; native menu + simulated storage/UI.
+package.path = "AnkiFlashcards.koplugin/?.lua;" .. package.path
 local State = dofile("AnkiFlashcards.koplugin/settings_state.lua")
 assert(State.normalize_url(" 192.168.50.213 ") == "http://192.168.50.213:8765")
 assert(State.normalize_url("computer.local:9000") == "http://computer.local:9000")
@@ -147,7 +148,7 @@ click("Cuenta y modelo"); click("Clave API:")
 assert(input.text_type == "password" and input.title:find("OpenRouter", 1, true))
 input.value = "router-secret"; input.buttons[1][2].callback()
 assert(saved.openrouter_api_key == "router-secret" and saved.gemini_api_key == "test-secret")
-click("Modelo de IA:"); input.value = ""; input.buttons[1][2].callback()
+click("Modelo de IA:"); click("Escribir modelo…"); input.value = ""; input.buttons[1][2].callback(); back()
 assert(saved.openrouter_model == "anthropic/claude-3-haiku")
 click("Clave API:"); input.value = ""; input.buttons[1][2].callback()
 assert(confirm and saved.openrouter_api_key == "router-secret")

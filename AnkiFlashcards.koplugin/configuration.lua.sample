@@ -9,6 +9,9 @@ local CONFIGURATION = {
     -- text_provider = "deepseek",
     -- deepseek_api_key = "YOUR_DEEPSEEK_API_KEY",
     -- deepseek_model = "deepseek-flash",
+    -- Optional per-provider controls; prefer the native menu's model list.
+    -- deepseek_thinking = "off", -- "auto", "on" or "off", where supported.
+    -- deepseek_reasoning_effort = "low", -- Provider/model-specific levels.
     target_language = "English", -- The book/card language; e.g. "Spanish".
 
     -- Vocabulary extras are optional. Learn always uses text and source quotes.

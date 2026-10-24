@@ -98,7 +98,7 @@ Herramientas → Anki Flashcards
 ├── Configuración
 │   ├── Conexión con Anki
 │   ├── Barajas y envío
-│   ├── Generación de tarjetas: servicio, cuenta/modelo e idioma
+│   ├── Generación de tarjetas: servicio, modelo, thinking, esfuerzo e idioma
 │   ├── Extras de vocabulario: imágenes y audio
 │   ├── Nube entre lectores: destino y sincronización al abrir
 │   └── Ayuda: funcionamiento y tipos de nota automáticos
@@ -484,6 +484,12 @@ Los proveedores de texto e imágenes son independientes, pero reutilizan la
 misma clave si eliges el mismo servicio. Cada apartado agrupa servicio y
 **Cuenta y modelo de IA**; no existe otra zona de claves/modelos duplicada.
 Las claves se ocultan en el editor y borrarlas requiere confirmación.
+**Modelo de IA** abre una lista por servicio con **Escribir modelo…** para
+identificadores personalizados. **Thinking** y **Esfuerzo** ofrecen los controles
+compatibles con el modelo seleccionado y se guardan por proveedor para Vocab,
+Learn y regeneración. **Generación de tarjetas → Ver configuración de proveedores**
+muestra también los ajustes de los servicios inactivos, sin exponer claves.
+El catálogo funciona sin conexión; [compatibilidad y fuentes](docs/AI_PROVIDERS.md).
 DeepSeek se conecta directamente a `api.deepseek.com`; se configura como
 proveedor de texto con una clave DeepSeek y un identificador de modelo.
 `image_provider =

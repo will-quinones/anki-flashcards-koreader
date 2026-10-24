@@ -561,7 +561,7 @@ local function openai_generate(config, image_prompt, phrase, on_success, on_erro
         "professional quality. No text, words, letters or numbers anywhere."
 
     local body = json.encode({
-        model  = config.openai_image_model or "gpt-image-1",
+        model  = config.openai_image_model or "gpt-image-1.5",
         prompt = prompt,
         n      = 1,
         size   = "1536x1024",

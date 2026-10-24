@@ -14,6 +14,7 @@ local http   = require("socket.http")
 local ltn12  = require("ltn12")
 local json   = require("json")
 local Feedback = require("generation_feedback")
+local AI = require("ai_configuration")
 
 local TIMEOUT = 20
 local STREAM_TIMEOUT = 45 -- Allow a slow first token while the modal remains cancellable.
@@ -38,7 +39,9 @@ local function call_llm(config, prompt, on_progress)
         return nil, "Servicio de texto no reconocido. Selecciónalo en Configuración → Generación de tarjetas."
     end
     local response_body = {}
-    local stream = on_progress and require("text_stream").new(provider, on_progress)
+    local selected_model = AI.model(config, provider)
+    local use_stream = on_progress or AI.requires_stream(config, provider, selected_model)
+    local stream = use_stream and require("text_stream").new(provider, on_progress or function() end)
     local sink = stream and function(chunk) return stream:sink(chunk) end or ltn12.sink.table(response_body)
     local function streamed(code, headers)
         if not stream then return end
@@ -75,9 +78,9 @@ local function call_llm(config, prompt, on_progress)
         local model = config.gemini_text_model or "gemini-2.5-flash"
         local url = GEMINI_BASE_URL .. model
             .. (stream and ":streamGenerateContent?alt=sse&key=" or ":generateContent?key=") .. api_key
-        local body = json.encode({
+        local body = json.encode(AI.apply({
             contents = {{ parts = {{ text = prompt }} }},
-        })
+        }, config, provider, model))
         https.TIMEOUT = stream and STREAM_TIMEOUT or TIMEOUT
         local _, code, headers = Feedback.request(https, {
             url     = url,
@@ -101,7 +104,7 @@ local function call_llm(config, prompt, on_progress)
            and data.candidates[1].content
            and data.candidates[1].content.parts then
             for _i, part in ipairs(data.candidates[1].content.parts) do
-                if part.text then if on_progress then on_progress(part.text) end; return part.text end
+                if part.text and not part.thought then if on_progress then on_progress(part.text) end; return part.text end
             end
         end
         return nil, "No text in Gemini response"
@@ -129,11 +132,11 @@ local function call_llm(config, prompt, on_progress)
         if endpoint == "" then
             endpoint = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
         end
-        local body = json.encode({
+        local body = json.encode(AI.apply({
             model    = model,
             messages = {{ role = "user", content = prompt }},
-            stream   = on_progress and true or nil,
-        })
+            stream   = stream and true or nil,
+        }, config, provider, model))
         https.TIMEOUT = stream and STREAM_TIMEOUT or TIMEOUT
         local _, code, headers = Feedback.request(https, {
             url     = endpoint,
