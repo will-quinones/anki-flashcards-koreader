@@ -89,4 +89,23 @@ assert(saved.openai_image_model=="gpt-image-2.5-flare")
 click("Modelo de IA:"); click("Escribir modelo…")
 input.value="my-custom-image-model"; input.buttons[1][2].callback(); back()
 assert(saved.openai_image_model=="my-custom-image-model" and saved.deepseek_model=="deepseek-v4-pro")
+-- Use the real key editor and persistence path to invalidate a catalog. A key
+-- edit must never carry a result from the old account into either selector.
+local Catalog=require("model_catalog")
+local jobs,cancels,queue=0,0,{}
+local UI=package.loaded["ui/uimanager"]
+UI.scheduleIn=function(_,_,fn) queue[#queue+1]=fn end
+UI.unschedule=function(_,fn) for i=#queue,1,-1 do if queue[i]==fn then table.remove(queue,i) end end end
+Catalog.launch=function()
+    jobs=jobs+1
+    return {poll=function() return nil end,cancel=function() cancels=cancels+1 end}
+end
+click("Clave API:")
+input.value="new-synthetic-key"; input.buttons[1][2].callback()
+click("Modelo de IA:"); click("Cargar catálogo")
+assert(jobs==1 and #queue==1)
+back(); click("Clave API:")
+input.value="replacement-key"; input.buttons[1][2].callback()
+assert(cancels==1 and #queue==0 and saved.openai_api_key=="replacement-key")
+assert(saved.openai_image_model=="my-custom-image-model" and saved.deepseek_api_key=="synthetic-secret")
 print("PASS: model presets/manual input, provider switching, native controls, safe summaries and failed-save isolation")

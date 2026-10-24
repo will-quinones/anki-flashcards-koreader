@@ -47,6 +47,7 @@ function Settings.menu_items(base, on_saved, ui)
     cfg.deck_mode = cfg.deck_mode or "book"
     cfg.tags = State.extra_tags(cfg.tags)
     local active_menu
+    local model_browsers = {}
     local function message(text) UIManager:show(InfoMessage:new {text = text}) end
     local function save(patch, replace)
         local next_cfg = {}
@@ -56,6 +57,7 @@ function Settings.menu_items(base, on_saved, ui)
         local ok, err = Storage.save_anki_settings(next_cfg)
         if not ok then message(_("No se guardaron los cambios. ") .. tostring(err or _("Comprueba el espacio libre."))); return false end
         cfg = next_cfg
+        if package.loaded.model_browser then package.loaded.model_browser.configuration_changed() end
         State.apply(base, cfg)
         if on_saved then on_saved(cfg) end
         if active_menu then active_menu:updateItems() end
@@ -130,20 +132,23 @@ function Settings.menu_items(base, on_saved, ui)
         local p, id = chosen(category)
         local field = p[category .. "_model"]
         if not field then return {} end
-        local items = {action(_("Escribir modelo…"), function()
-            edit(_("Modelo personalizado de ") .. p.name, field.key, field.default, function(value)
-                return AI.validate_model(value, field.default, id)
-            end, cfg[field.key] or field.default)
-        end)}
-        for _i, model in ipairs(AI.choices(id, category, cfg[field.key] or field.default, field.default)) do
-            local value = model
-            local item = action(value .. (value == field.default and _(" (predeterminado)") or ""), function()
-                save({[field.key] = value})
-            end)
-            item.checked_func = function() return (cfg[field.key] or field.default) == value end
-            items[#items+1] = item
+        local key = id .. "/" .. category
+        if not model_browsers[key] then
+            model_browsers[key] = require("model_browser").new {
+                provider=id, category=category, name=p.name, field=field,
+                config=function() return cfg end,
+                select=function(value) return save({[field.key]=value}) end,
+                edit=function()
+                    edit(_("Modelo personalizado de ") .. p.name, field.key, field.default, function(value)
+                        return AI.validate_model(value, field.default, id)
+                    end, cfg[field.key] or field.default)
+                end,
+            }
         end
-        return items
+        model_browsers[key].menu = nil
+        model_browsers[key]:check_identity()
+        model_browsers[key]:render()
+        return model_browsers[key].items
     end
     local function thinking_choices()
         local id = select(2, chosen("text"))
@@ -221,7 +226,7 @@ function Settings.menu_items(base, on_saved, ui)
                 message(text)
             end),
         }
-        items[2].help_text = _("Elige un modelo de la lista incluida o usa Escribir modelo… para uno personalizado. La disponibilidad depende de tu cuenta y región.")
+        items[2].help_text = _("Carga el catálogo del proveedor y busca por nombre, elige de la lista incluida o usa Escribir modelo… para uno personalizado. Buscar no cambia la selección. La disponibilidad depende de tu cuenta y región.")
         if category == "text" then
             table.insert(items, 3, submenu(function()
                 local current = AI.current(cfg, select(2, chosen("text")))
@@ -434,5 +439,8 @@ function Settings.menu_items(base, on_saved, ui)
             message(_("Selecciona texto y elige Anki Vocab para palabras o Anki Learn para ideas. Revisa la propuesta y guarda o envía desde cualquiera de sus caras.\n\nEl complemento prepara KOReader Vocabulary (Cloze) y KOReader Learn (pregunta/respuesta) al enviar. No necesitas elegir ni configurar tipos de nota. Nunca modifica tipos incompatibles ni cambia tus repasos."))
         end),
     }
+end
+function Settings.cancel_catalog()
+    if package.loaded.model_browser then package.loaded.model_browser.cancel_all() end
 end
 return Settings

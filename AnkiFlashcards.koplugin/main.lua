@@ -578,6 +578,7 @@ end
 
 function AnkiFlashcards:onCloseDocument()
     VocabGeneration.cancel_all()
+    SettingsViewer.cancel_catalog()
     ReadingMarker.clear(self.ui)
     self._auto_send_resume = false
     if self._auto_send then self._auto_send:stop() end
@@ -587,6 +588,7 @@ function AnkiFlashcards:onExit()
 end
 function AnkiFlashcards:onSuspend()
     VocabGeneration.cancel_all()
+    SettingsViewer.cancel_catalog()
     ReadingMarker.clear(self.ui)
     self._auto_send_resume = self._auto_send and self._auto_send.running
     if self._auto_send then self._auto_send:stop() end

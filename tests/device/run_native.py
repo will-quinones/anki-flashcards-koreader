@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import uuid
+import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,6 +29,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+    def do_GET(self):
+        """Only synthetic catalog discovery, including the real TLS/fork path."""
+        path = urllib.parse.urlsplit(self.path)
+        provider = path.path.rsplit("/", 1)[-1]
+        assert self.headers.get("Authorization") in (None, "Bearer synthetic", "Bearer synthetic-secret")
+        assert self.headers.get("x-goog-api-key") in (None, "synthetic")
+        query = urllib.parse.parse_qs(path.query)
+        if provider == "gemini":
+            data = {"models": [{"name": "models/gemini-synthetic", "supportedGenerationMethods": ["generateContent"]}]}
+        elif provider == "openrouter":
+            data = {"data": [{"id": "vendor/synthetic:free", "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}}]}
+        elif provider == "dashscope":
+            data = {"output": {"total": 1, "models": [{"model": "qwen-synthetic", "capabilities": ["TG"]}]}}
+        elif provider == "openai":
+            data = {"data": [{"id": "gpt-synthetic"}]}
+        else:
+            assert provider == "deepseek"
+            data = {"data": [{"id": "deepseek-synthetic"}]}
+        if query.get("slow"):
+            time.sleep(2)
+        raw = json.dumps(data).encode()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
+            pass
 
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -149,7 +181,7 @@ cd {shlex.quote(args.koreader)}
             if "NATIVE_" in line or "DEVICE_LUA_TESTS_PASS_" in line:
                 print(line, flush=True)
         expected = {"NATIVE_IN_PLACE_RENDER_PASS", "NATIVE_TRANSPORT_RETRY_PASS", "NATIVE_DELAYED_FIRST_BYTE_PASS", "NATIVE_AI_SETTINGS_PASS",
-                    "NATIVE_LEARN_STREAMING_PASS", "NATIVE_CANCELLATION_PASS"}
+                    "NATIVE_LEARN_STREAMING_PASS", "NATIVE_CANCELLATION_PASS", "NATIVE_MODEL_CATALOG_PASS"}
         assert expected.issubset(set(result.stdout.splitlines()))
         return 0
     finally:

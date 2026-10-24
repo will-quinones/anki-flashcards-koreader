@@ -36,6 +36,10 @@ older sections may describe menus that have since been retired.
   every generation path. Default settings must preserve the service defaults.
   Provider summaries never reveal credentials; document catalog sources and
   review dates in docs/AI_PROVIDERS.md when changing model capabilities.
+- Model discovery is explicit and cancellable. Search is local and never
+  changes the selected model. Preserve custom IDs and the prior catalog on
+  refresh failure. Invalidate cached/late results when credentials or endpoints
+  change; never serialize credentials into worker snapshots.
 
 ## Upstream integration
 

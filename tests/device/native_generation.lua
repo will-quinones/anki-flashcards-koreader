@@ -33,6 +33,10 @@ local tasks, visible = {}, nil
 function UI:scheduleIn(delay, callback) tasks[#tasks+1] = {at=socket.gettime()+delay, callback=callback} end
 function UI:unschedule(callback) for i=#tasks,1,-1 do if tasks[i].callback==callback then table.remove(tasks,i) end end end
 package.loaded["ui/uimanager"] = UI
+-- Menu closure checks the live app only to choose its repaint mode. Loading a
+-- full FileManager here would initialize unrelated network/hardware listeners.
+package.loaded["apps/filemanager/filemanager"] = {}
+package.loaded["apps/reader/readerui"] = {}
 local stage = assert(arg[1], "Pass the temporary test directory")
 package.path = stage .. "/AnkiFlashcards.koplugin/?.lua;" .. package.path
 local Font = require("ui/font")
@@ -201,6 +205,53 @@ for _,id in ipairs({"deepseek","gemini","openai","dashscope","openrouter"}) do
 end
 assert(saved_settings.deepseek_api_key=="synthetic-secret")
 print("NATIVE_AI_SETTINGS_PASS")
+
+-- Every discovery request is redirected to the local synthetic TLS service;
+-- no real keys or provider requests. Exercise native LuaSec, fork, cancellation
+-- and a paginated native menu with exact model identifiers.
+local Catalog=require("model_catalog")
+local Browser=require("model_browser")
+local https=require("ssl.https")
+local native_request=https.request
+local catalog_provider,slow
+https.request=function(options)
+    assert(options.method=="GET")
+    options.url=config.provider.."/catalog/"..catalog_provider..(slow and "?slow=1" or "")
+    return native_request(options)
+end
+for _,id in ipairs({"deepseek","gemini","openai","dashscope","openrouter"}) do
+    catalog_provider=id
+    local job=assert(Catalog.launch({[id.."_api_key"]="synthetic"},id,"text"))
+    local result
+    run_until(function() result=job:poll(UI); return result~=nil end)
+    assert(result.models and #result.models==1,result.error)
+end
+catalog_provider="deepseek"
+local catalog_cfg={deepseek_api_key="synthetic",deepseek_model="my-custom-model"}
+local chosen_count=0
+local browser=Browser.new {provider="deepseek",category="text",name="DeepSeek",field=AI.fields.deepseek,
+    config=function() return catalog_cfg end,
+    select=function(value) catalog_cfg.deepseek_model=value; chosen_count=chosen_count+1; return true end,
+    edit=function() error("Manual entry is covered in the settings regression") end}
+browser:load()
+run_until(function() return browser.job==nil and #tasks==0 end)
+assert(browser.models and browser.models[1]=="deepseek-synthetic" and chosen_count==0)
+local TouchMenu=require("ui/widget/touchmenu")
+browser.items.icon="appbar.settings"
+local selector=TouchMenu:new {tab_item_table={browser.items},width=screen:getWidth()}
+UI:show(selector)
+item(browser.items,"deepseek-synthetic").callback(selector)
+assert(chosen_count==1 and catalog_cfg.deepseek_model=="deepseek-synthetic")
+browser.query="missing-model"; browser:render()
+assert(item(browser.items,"Sin resultados"))
+UI:close(selector); browser.menu=nil
+slow=true
+browser:load(); local loading=visible
+UI:scheduleIn(0.25,function() UI:close(loading) end)
+run_until(function() return browser.job==nil and #tasks==0 end)
+assert(chosen_count==1 and catalog_cfg.deepseek_model=="deepseek-synthetic")
+https.request=native_request
+print("NATIVE_MODEL_CATALOG_PASS")
 doc:close()
 screen.bb:free()
 print("NATIVE_CANCELLATION_PASS")

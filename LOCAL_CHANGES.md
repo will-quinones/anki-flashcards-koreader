@@ -1,5 +1,30 @@
 # Cambios locales
 
+## Catálogos y búsqueda como Anki AI Tutor (2026-10-23)
+
+El selector se guía por el navegador de modelos de Anki AI Tutor: carga explícita
+del catálogo, búsqueda local por todas las palabras, identificador exacto,
+modelo actual visible y selección independiente de la búsqueda. Se adapta a
+menús nativos de KOReader para Gemini, OpenRouter, DeepSeek, OpenAI y Qwen;
+mantiene entrada manual, lista incluida y controles de thinking por proveedor.
+Las cuentas de imágenes filtran los modelos que admite su integración.
+
+La consulta usa un proceso cancelable y un aviso que se puede cerrar. Suspender
+o cerrar el documento también cancela. Los cambios de clave o dirección
+invalidan catálogo y respuestas pendientes; los errores conservan la lista y
+la selección anteriores. El catálogo se conserva solo en memoria, con límites
+de tamaño, paginación y tiempo. Solo los IDs validados o un error seguro cruzan
+el límite del proceso; las claves no se escriben en archivos temporales.
+
+Pruebas locales: 61/61, sin omisiones; sintaxis de 39 módulos. Se cubren los cinco
+catálogos, imágenes/texto, paginación, errores, límites, búsqueda de 5000 modelos,
+cambio de clave, selección explícita, respuestas antiguas y cancelación.
+En el Kobo pasan las 46 pruebas Lua y los escenarios nativos: consulta de los
+cinco catálogos con TLS/fork reales contra un servicio sintético, selección y
+filtrado en TouchMenu, cancelación durante la consulta y los escenarios de
+generación/streaming existentes. Se añadieron al simulador los contextos vacíos
+de lector y explorador que el cierre nativo consulta para decidir el refresco.
+
 ## Modelos y razonamiento por proveedor (2026-10-23)
 
 Cuenta y modelo de IA permite elegir modelos de una lista sin conexión o escribir
