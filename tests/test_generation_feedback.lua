@@ -1,4 +1,10 @@
 -- luajit tests/test_generation_feedback.lua: bounded retries, no real requests.
+local diagnostics = {}
+package.loaded.logger = {info = function(...)
+    local values = {...}
+    for i, value in ipairs(values) do values[i] = tostring(value) end
+    diagnostics[#diagnostics+1] = table.concat(values, " ")
+end}
 local Feedback = dofile("AnkiFlashcards.koplugin/generation_feedback.lua")
 local queue, shown, delays = {}, {}, {}
 package.loaded["ui/uimanager"] = {
@@ -53,6 +59,11 @@ drain()
 assert(failed.kind == "unknown" and #shown == 1)
 local result, reason = Feedback.request({request = function() error("private-key") end}, {})
 assert(result == nil and reason == "request_failed")
+Feedback.request({request = function() return nil, "wantread private-key" end}, {})
+Feedback.request({request = function() error("text_stream.lua:37: private-key", 0) end}, {})
+assert(diagnostics[#diagnostics]:find("exception unknown text_stream.lua:37", 1, true))
+assert(diagnostics[#diagnostics-1]:find("failure wantread", 1, true))
+for _, line in ipairs(diagnostics) do assert(not line:find("private-key", 1, true)) end
 local _, _, embedded = Feedback.response_error({error = {type = "overloaded_error"}}, "at capacity", {})
 assert(embedded.kind == "busy" and embedded.retryable)
 assert(not Feedback.classify("Gemini error: https://example.com?key=private-key").message:find("private-key", 1, true))

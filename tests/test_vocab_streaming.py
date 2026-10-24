@@ -124,3 +124,89 @@ print("PASS: streaming across arbitrary byte boundaries, provider payloads, Unic
     import re
     script = re.sub("|".join(substitutions), lambda m: substitutions[m.group()], script)
     run(script)
+
+
+def test_stream_limits_count_card_text_separately_from_sse_metadata():
+    card = {"phrase": "action", "definition": "A synthetic act.", "text": "Take {{c1::action}}."}
+    raw = json.dumps(card)
+    reasoning = {"id": "s" * 40, "object": "chat.completion.chunk", "created": 100,
+                 "model": "synthetic", "system_fingerprint": "f" * 60,
+                 "choices": [{"index": 0, "delta": {"content": None,
+                              "reasoning_content": "HIDDEN_REASONING " * 8}, "finish_reason": None}]}
+    content = {"choices": [{"delta": {"content": raw}}]}
+    oversized = {"choices": [{"delta": {"content": "x" * 140000}}]}
+    error = {"error": {"code": 503, "message": "overloaded synthetic-secret"}}
+    fixtures = {raw: card}
+    for value in (reasoning, content, oversized, error):
+        fixtures[json.dumps(value)] = value
+    script = """
+package.path = "AnkiFlashcards.koplugin/?.lua;" .. package.path
+local fixtures = FIXTURES
+package.loaded.json = {encode = function() return "BODY" end,
+    decode = function(raw) assert(fixtures[raw], "Invalid synthetic JSON"); return fixtures[raw] end}
+local Stream = require("text_stream")
+local progress = {}
+local stream = Stream.new("deepseek", function(text) progress[#progress+1] = text end)
+for i = 1, 700 do assert(stream:sink(REASONING)) end
+assert(stream.bytes > 262144 and #stream.text == 0 and #progress == 0)
+assert(stream:sink(CONTENT)); assert(stream:sink("data: [DONE]\\n\\n"))
+assert(stream:sink(nil) and stream.done and stream.text == RAW and #progress == 1)
+assert(stream.buffer == "")
+
+-- A missing frame delimiter, a huge card and unbounded wire traffic still stop.
+local bounded = Stream.new("deepseek", function() end)
+local ok, err = bounded:sink(string.rep("x", 262145))
+assert(not ok and err:find("frame too large", 1, true) and #bounded.text == 0)
+bounded = Stream.new("deepseek", function() end)
+assert(bounded:sink(OVERSIZED))
+ok, err = bounded:sink(OVERSIZED)
+assert(not ok and err:find("text too large", 1, true) and #bounded.text == 140000)
+bounded = Stream.new("deepseek", function() end)
+for i = 1, 9000 do
+    ok, err = bounded:sink(":" .. string.rep("x", 1021) .. "\\n\\n")
+    if not ok then break end
+end
+assert(not ok and err == "Streaming response too large" and #bounded.text == 0)
+
+local mode = "metadata"
+package.loaded.ltn12 = {source = {string = function(s) return s end}, sink = {table = function(t)
+    return function(s) if s then t[#t+1] = s end; return 1 end end}}
+local transport = {request = function(options)
+    if mode == "metadata" then
+        for i = 1, 700 do
+            local accepted, reason = options.sink(REASONING)
+            if not accepted then return nil, reason end
+        end
+        assert(options.sink(CONTENT)); assert(options.sink("data: [DONE]\\n\\n"))
+        assert(options.sink(nil)); return 1, 200, {}
+    end
+    local accepted, reason = options.sink(mode == "provider_error" and ERROR_FRAME or string.rep("x", 262145))
+    assert(not accepted)
+    return nil, reason -- LuaSocket reports the sink error instead of an HTTP status.
+end}
+package.loaded["ssl.https"], package.loaded["socket.http"] = transport, transport
+local Generator = require("card_generator")
+local Feedback = require("generation_feedback")
+local config = {text_provider="deepseek", deepseek_api_key="synthetic", images_enabled=false}
+local result, reason = Generator.generate(config, "action", "synthetic", "book", "author", function() end)
+assert(result and result.definition == "A synthetic act.", reason)
+mode = "limit"
+local details
+result, reason, details = Generator.generate(config, "action", "", "", "", function() end)
+assert(not result and reason:find("frame too large", 1, true))
+assert(Feedback.classify(reason, details).kind == "invalid")
+assert(not Feedback.classify(reason, details).retryable)
+mode = "provider_error"
+result, reason, details = Generator.generate(config, "action", "", "", "", function() end)
+assert(not result and details.kind == "busy" and details.status == 503 and details.retryable)
+assert(not reason:find("synthetic-secret", 1, true))
+print("PASS: realistic SSE overhead permits a small card; local bounds and API errors retain their real cause")
+"""
+    substitutions = {"FIXTURES": lua(fixtures), "RAW": lua(raw),
+                     "REASONING": lua("data: " + json.dumps(reasoning) + "\n\n"),
+                     "CONTENT": lua("data: " + json.dumps(content) + "\n\n"),
+                     "OVERSIZED": lua("data: " + json.dumps(oversized) + "\n\n"),
+                     "ERROR_FRAME": lua("data: " + json.dumps(error) + "\n\n")}
+    import re
+    script = re.sub("|".join(substitutions), lambda m: substitutions[m.group()], script)
+    run(script)

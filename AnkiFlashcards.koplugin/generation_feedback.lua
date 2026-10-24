@@ -2,6 +2,23 @@
 local Feedback = {GENERATING = "Generando tarjeta…", REGENERATING = "Regenerando tarjeta…",
     RETRYING = "Servicio ocupado. Reintentando…"}
 local function has(text, needle) return text:find(needle, 1, true) ~= nil end
+local logger_ok, logger = pcall(require, "logger")
+local diagnostic_modules = { ["text_stream.lua"] = true, ["card_generator.lua"] = true,
+    ["generation_worker.lua"] = true, ["https.lua"] = true, ["http.lua"] = true,
+    ["ltn12.lua"] = true, ["socket.lua"] = true, ["json.lua"] = true }
+local function request_diagnostic(exception, reason)
+    if not logger_ok then return end
+    local raw = type(reason) == "string" and reason:lower() or ""
+    local category = "unknown"
+    for _, known in ipairs({"response too large", "response text too large", "response frame too large",
+        "wantread", "wantwrite", "timeout", "closed", "connection", "handshake", "certificate",
+        "host not found", "eof", "invalid chunk size", "bad record mac", "malformed response", "reset"}) do
+        if has(raw, known) then category = known; break end
+    end
+    local module, line = raw:match("([%w_]+%.lua):(%d+):")
+    local location = module and diagnostic_modules[module] and (module .. ":" .. line) or ""
+    logger.info("Anki transport:", exception and "exception" or "failure", category, location, type(reason), #raw)
+end
 local function shorten(text)
     if #text <= 220 then return text end
     return (text:sub(1, 210):match("^(.*)%s") or "No se pudo generar la tarjeta.") .. "…"
@@ -104,7 +121,8 @@ function Feedback.http_error(code, body, headers)
 end
 function Feedback.request(requester, options)
     local ok, result, code, headers = pcall(requester.request, options)
-    if not ok then return nil, "request_failed" end
+    if not ok then request_diagnostic(true, result); return nil, "request_failed" end
+    if not result then request_diagnostic(false, code) end
     return result, code, headers
 end
 function Feedback.run(task, on_success, on_failure, options)

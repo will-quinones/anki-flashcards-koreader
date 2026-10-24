@@ -1,6 +1,9 @@
 -- SSE framing is independent of HTTP chunk boundaries (including UTF-8).
 local json = require("json")
 local Stream = {}
+-- SSE repeats an envelope for every token and may carry hidden reasoning.
+-- Bound retained text and individual frames separately from total wire bytes.
+local MAX_TEXT_BYTES, MAX_FRAME_BYTES, MAX_WIRE_BYTES = 262144, 262144, 8 * 1024 * 1024
 function Stream.new(provider, on_text)
     local self = {buffer = "", text = "", bytes = 0, events = false}
     local function event(frame)
@@ -32,27 +35,33 @@ function Stream.new(provider, on_text)
             if type(content) == "string" then delta = content end
         end
         if delta ~= "" and not self.error then
+            if #self.text + #delta > MAX_TEXT_BYTES then self.error = "Streaming response text too large"; return end
             self.text = self.text .. delta
             on_text(self.text)
         end
     end
     function self:sink(chunk)
+        if self.error then return nil, self.error end
         if not chunk then
             if self.buffer ~= "" then
                 event(self.buffer:gsub("\r\n", "\n"))
                 self.buffer = ""
             end
+            if self.error then return nil, self.error end
             return 1
         end
         self.bytes = self.bytes + #chunk
-        if self.bytes > 262144 then self.error = "Streaming response too large"; return nil, self.error end
+        if self.bytes > MAX_WIRE_BYTES then self.error = "Streaming response too large"; return nil, self.error end
         self.buffer = self.buffer .. chunk
         while true do
             local a, b = self.buffer:find("\r?\n\r?\n")
             if not a then break end
+            if a - 1 > MAX_FRAME_BYTES then self.error = "Streaming response frame too large"; return nil, self.error end
             event(self.buffer:sub(1, a - 1):gsub("\r\n", "\n"))
             self.buffer = self.buffer:sub(b + 1)
+            if self.error then return nil, self.error end
         end
+        if #self.buffer > MAX_FRAME_BYTES then self.error = "Streaming response frame too large"; return nil, self.error end
         return 1
     end
     return self

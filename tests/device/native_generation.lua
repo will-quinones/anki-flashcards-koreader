@@ -100,9 +100,9 @@ local Feedback=require("generation_feedback")
 require("card_generator") -- Load native TLS in the parent, as in KOReader.
 local config={text_provider="dashscope",images_enabled=false,api_key="synthetic",provider=assert(arg[2]),model="synthetic"}
 local function run_until(done)
-    local deadline=socket.gettime()+20
+    local deadline=socket.gettime()+60
     while not done() do
-        assert(socket.gettime()<deadline, "Native scenario timed out")
+        if socket.gettime()>=deadline then Generation.cancel_all(); error("Native scenario timed out") end
         table.sort(tasks,function(a,b) return a.at<b.at end)
         if tasks[1] and tasks[1].at<=socket.gettime() then table.remove(tasks,1).callback()
         else ffi.C.usleep(5000) end
@@ -139,6 +139,7 @@ Generation.start(config,{selected="Synthetic evidence.",context="Synthetic evide
 end,{kind="learn",on_failure=function() failed=true end})
 run_until(function()
     if visible and visible.generating then assert(not visible.stream_text:find("HIDDEN_ANSWER",1,true)) end
+    if visible and visible.generating then assert(not visible.stream_text:find("HIDDEN_REASONING",1,true)) end
     return complete or failed
 end)
 assert(complete and not failed)

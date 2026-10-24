@@ -45,16 +45,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self.send_header("Connection", "close")
         self.end_headers()
-        frames = [": keep-alive\n\n"]
+        def event(data):
+            return "data: " + json.dumps(data) + "\n\n"
+
+        reasoning = event({"id": "s" * 40, "object": "chat.completion.chunk", "created": 100,
+                           "model": "synthetic", "system_fingerprint": "f" * 60,
+                           "choices": [{"index": 0, "delta": {"content": None,
+                                       "reasoning_content": "HIDDEN_REASONING " * 8}, "finish_reason": None}]})
+        # A small visible card can have hundreds of kilobytes of SSE envelopes.
+        reasoning_count = 262144 // len(reasoning) + 20
+        frames = [": keep-alive\n\n",
+                  event({"choices": [{"delta": {"role": "assistant", "content": ""},
+                                       "finish_reason": None, "logprobs": None}]})]
+        frames.extend(reasoning * min(20, reasoning_count - start) for start in range(0, reasoning_count, 20))
         frames.extend("data: " + json.dumps({"choices": [{"delta": {"content": raw[start:start + 16]}}]}) + "\n\n"
                       for start in range(0, len(raw), 16))
-        frames.append("data: [DONE]\n\n")
+        frames.extend(["data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}]}) + "\n\n",
+                       "data: " + json.dumps({"choices": [], "usage": {"total_tokens": 100}}) + "\n\n",
+                       "data: [DONE]\n\n"])
         try:
             for frame in frames:
                 chunk = frame.encode()
                 self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
                 self.wfile.flush()
-                time.sleep(0.18)
+                if not frame.startswith(reasoning):
+                    time.sleep(0.18)
             self.wfile.write(b"0\r\n\r\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
@@ -124,7 +139,7 @@ echo "DEVICE_LUA_TESTS_PASS_$count"
 cd {shlex.quote(args.koreader)}
 {shlex.quote(args.koreader + '/luajit')} {shlex.quote(remote + '/' + native)} {shlex.quote(remote)} {shlex.quote(endpoint)}
 """
-        result = subprocess.run(ssh + [command], capture_output=True, text=True, timeout=60)
+        result = subprocess.run(ssh + [command], capture_output=True, text=True, timeout=150)
         if result.returncode:
             print(result.stdout + result.stderr, flush=True)
             return result.returncode

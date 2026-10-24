@@ -42,10 +42,14 @@ local function call_llm(config, prompt, on_progress)
     local function streamed(code, headers)
         if not stream then return end
         stream:sink(nil)
+        -- LuaSocket returns the sink's own error instead of an HTTP status
+        -- when we abort locally. Preserve that cause and embedded API details.
+        if stream.error and (tostring(code) == "200" or not tonumber(code)) then
+            return nil, stream.error, stream.details
+        end
         if tostring(code) ~= "200" then
             return Feedback.http_error(code, table.concat(response_body), headers)
         end
-        if stream.error then return nil, stream.error, stream.details end
         if stream.events then
             if stream.text == "" then return nil, "No text in streaming response" end
             return stream.text

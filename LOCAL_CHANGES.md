@@ -1,5 +1,27 @@
 # Cambios locales
 
+## Límite de streaming independiente de los metadatos (2026-10-23)
+
+Reproducido en el Kobo un corte local a 262506 bytes de SSE sin haber recibido
+texto visible. El límite anterior de 256 KiB contaba también los envoltorios
+repetidos por token y el razonamiento oculto. LuaSocket devolvía ese error local
+como resultado fallido sin código HTTP y terminaba presentado como una
+interrupción de conexión. La primera corrección de reintentos no resolvía ese
+corte; el diagnóstico de los intentos reales aún no distinguía esa causa.
+
+El texto de la tarjeta y cada evento conservan límites de 256 KiB. El tráfico
+SSE completo tiene un límite separado de 8 MiB y se mantiene el límite temporal
+del trabajador. Los errores del procesador y los detalles de errores API
+embebidos conservan su causa, sin convertirse en falsos errores de transporte.
+Los registros solo contienen categorías permitidas, ubicaciones de módulos
+conocidos y recuentos; nunca claves, selecciones o respuestas generadas.
+
+La nueva regresión falla contra el commit anterior 1300cd2 y pasa con el cambio.
+Batería completa 56/56, sin omisiones; sintaxis de 36 módulos correcta. También
+pasan las 41 pruebas Lua y los escenarios nativos del Kobo, con más de 256 KiB
+de metadatos/razonamiento sintéticos antes de una tarjeta pequeña, campos nulos,
+metadatos finales, reintento y cancelación. No se contactan servicios de pago.
+
 ## Generación compartida y diagnóstico nativo (2026-10-23)
 
 Learn y Vocab comparten streaming en segundo plano, cancelación al cerrar y

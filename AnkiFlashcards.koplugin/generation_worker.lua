@@ -17,6 +17,7 @@ local function write(path, value)
 end
 function Worker.launch(config, source, kind)
     trace("prepare")
+    trace(kind == "learn" and "kind:learn" or "kind:vocab")
     local util = require("ffi/util")
     for _, name in ipairs({"runInSubProcess", "isSubProcessDone", "terminateSubProcess"}) do
         if type(util[name]) ~= "function" then return nil, "El lector no admite generación en segundo plano." end
