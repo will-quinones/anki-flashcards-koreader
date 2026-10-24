@@ -133,6 +133,17 @@ Feedback.request=request
 print("NATIVE_TRANSPORT_RETRY_PASS")
 
 complete,failed=false,false
+local delayed={}
+for key,value in pairs(config) do delayed[key]=value end
+delayed.provider=config.provider.."/delayed"
+Generation.start(delayed,{phrase="action",context="Synthetic",title="Synthetic",author="Test"},function(card)
+    assert(card.phrase=="action"); complete=true
+end,{on_failure=function() failed=true end})
+run_until(function() return complete or failed end)
+assert(complete and not failed)
+print("NATIVE_DELAYED_FIRST_BYTE_PASS")
+
+complete,failed=false,false
 Generation.start(config,{selected="Synthetic evidence.",context="Synthetic evidence.",title="Synthetic",author="Test"},function(card)
     assert(card.kind=="learn" and card.answer=="HIDDEN_ANSWER")
     show_card(card); complete=true

@@ -64,6 +64,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        "data: " + json.dumps({"choices": [], "usage": {"total_tokens": 100}}) + "\n\n",
                        "data: [DONE]\n\n"])
         try:
+            if self.path.endswith("/delayed"):
+                time.sleep(23) # More than the former 20-second streaming timeout.
             for frame in frames:
                 chunk = frame.encode()
                 self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
@@ -146,7 +148,7 @@ cd {shlex.quote(args.koreader)}
         for line in result.stdout.splitlines():
             if "NATIVE_" in line or "DEVICE_LUA_TESTS_PASS_" in line:
                 print(line, flush=True)
-        expected = {"NATIVE_IN_PLACE_RENDER_PASS", "NATIVE_TRANSPORT_RETRY_PASS",
+        expected = {"NATIVE_IN_PLACE_RENDER_PASS", "NATIVE_TRANSPORT_RETRY_PASS", "NATIVE_DELAYED_FIRST_BYTE_PASS",
                     "NATIVE_LEARN_STREAMING_PASS", "NATIVE_CANCELLATION_PASS"}
         assert expected.issubset(set(result.stdout.splitlines()))
         return 0

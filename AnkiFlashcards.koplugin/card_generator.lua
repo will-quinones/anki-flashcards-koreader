@@ -16,6 +16,7 @@ local json   = require("json")
 local Feedback = require("generation_feedback")
 
 local TIMEOUT = 20
+local STREAM_TIMEOUT = 45 -- Allow a slow first token while the modal remains cancellable.
 https.TIMEOUT = TIMEOUT
 http.TIMEOUT  = TIMEOUT
 
@@ -77,7 +78,7 @@ local function call_llm(config, prompt, on_progress)
         local body = json.encode({
             contents = {{ parts = {{ text = prompt }} }},
         })
-        https.TIMEOUT = TIMEOUT
+        https.TIMEOUT = stream and STREAM_TIMEOUT or TIMEOUT
         local _, code, headers = Feedback.request(https, {
             url     = url,
             method  = "POST",
@@ -133,7 +134,7 @@ local function call_llm(config, prompt, on_progress)
             messages = {{ role = "user", content = prompt }},
             stream   = on_progress and true or nil,
         })
-        https.TIMEOUT = TIMEOUT
+        https.TIMEOUT = stream and STREAM_TIMEOUT or TIMEOUT
         local _, code, headers = Feedback.request(https, {
             url     = endpoint,
             method  = "POST",

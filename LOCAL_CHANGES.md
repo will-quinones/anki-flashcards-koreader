@@ -1,5 +1,19 @@
 # Cambios locales
 
+## Más margen para el primer fragmento (2026-10-23)
+
+Tras comprobar generaciones reales de Vocab y Learn, quedó un fallo aislado
+tras 20 segundos sin progreso y una interrupción de conexión en el reintento.
+Se amplía de 20 a 45 segundos la espera de red de las solicitudes con streaming,
+para ambos tipos de tarjeta y todos los servicios de texto compatibles.
+Las solicitudes sin streaming conservan sus 20 segundos; el límite general
+del trabajador sigue en 90 segundos y cerrar el modal cancela inmediatamente.
+El límite SSE permanece en 8 MiB y no cambia el guardado explícito.
+
+Las regresiones comprueban los tiempos de ambas rutas y añaden un servidor TLS
+sintético que espera 23 segundos antes del primer fragmento, además de la
+cancelación real. La batería local completa pasa 56/56 casos sin omisiones.
+
 ## Límite de streaming independiente de los metadatos (2026-10-23)
 
 Reproducido en el Kobo un corte local a 262506 bytes de SSE sin haber recibido

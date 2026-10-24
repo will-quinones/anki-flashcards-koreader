@@ -106,11 +106,14 @@ for _, provider in ipairs({"openai", "openrouter", "deepseek", "dashscope", "gem
     end)
     assert(result and result.definition == preview.definition, err)
     assert(called_early)
+    assert(transport.TIMEOUT == 45)
     if provider == "gemini" then assert(request.url:find(":streamGenerateContent?alt=sse", 1, true))
     else assert(payload.stream == true) end
 end
 response = "NONSTREAM"
 assert(Generator.generate({text_provider="openai",openai_api_key="key"}, "word", "", "", "", function() end))
+assert(Generator.generate({text_provider="openai",openai_api_key="key"}, "word", "", "", ""))
+assert(transport.TIMEOUT == 20) -- Nonstream requests retain their existing timeout.
 local stream = Stream.new("openai", function() error("error envelope must never appear as card text") end)
 stream:sink(ERROR_FRAME); stream:sink(nil)
 assert(stream.error and stream.details.retryable)
