@@ -182,7 +182,8 @@ al elegir explícitamente la acción Anki correspondiente.
    se rechaza y se indica que se elimine desde Anki. No hay borrado remoto automático.
 
 Al cerrar una tarjeta Vocab abierta desde la lectura, la selección original
-parpadea dos veces para ayudarte a retomarla. No crea subrayados ni cambia de
+parpadea dos veces para ayudarte a retomarla, refrescando solo los fragmentos
+del texto y sin avanzar el contador de limpieza completa. No crea subrayados ni cambia de
 página; solo se muestra si la selección corresponde al libro y la vista actuales.
 Cambiar de cara, regenerar o recibir una imagen no activa el parpadeo.
 

@@ -112,6 +112,43 @@ local function run_until(done)
         else ffi.C.usleep(5000) end
     end
 end
+
+-- Real CRe positions and native pixel inversion, with refresh requests captured
+-- before any hardware access. Both on/off phases must stay on the text boxes.
+local Marker=require("reading_marker")
+local hits=assert(doc:findAllText("action",true,0,5,false))
+local hit=assert(hits[1])
+assert(type(hit.start)=="string" and type(hit["end"])=="string")
+local selection={pos0=hit.start,pos1=hit["end"],text="action"}
+local source_boxes=doc:getScreenBoxesFromPositions(selection.pos0,selection.pos1,true)
+assert(#source_boxes>0)
+local reader={document=doc,view={state={pos=0},view_modules={}}}
+function reader.view:registerViewModule(name,value) self.view_modules[name]=value end
+local marker_dirty=UI.setDirty
+local requests,painted=0,0
+UI.setDirty=function(self,widget,mode,region)
+    if widget~=reader then return marker_dirty(self,widget,mode,region) end
+    assert(mode=="ui" and region and region.w>0 and region.h>0)
+    assert(region.x>=0 and region.y>=0 and region.x+region.w<=1264 and region.y+region.h<=1680)
+    assert(region.w*region.h<1264*1680)
+    requests=requests+1
+    local bb=Blitbuffer.new(1264,1680,Blitbuffer.TYPE_BB8)
+    bb:fill(Blitbuffer.COLOR_WHITE)
+    local marker=reader.view.view_modules.ankivocab_return
+    if marker then marker:paintTo(bb) end
+    local x,y=math.floor(region.x+region.w/2),math.floor(region.y+region.h/2)
+    assert(bb:getPixel(x,y).a==(marker and marker.visible and 0 or 255))
+    assert(bb:getPixel(1263,1679).a==255)
+    if marker and marker.visible then painted=painted+1 end
+    bb:free()
+end
+Marker.flash(reader,{book={file=doc.file},selection=selection})
+run_until(function() return #tasks==0 end)
+assert(requests==4*#source_boxes and painted==2*#source_boxes)
+assert(not reader.view.view_modules.ankivocab_return and reader.view.state.pos==0)
+UI.setDirty=marker_dirty
+print("NATIVE_READING_MARKER_REGIONS_PASS")
+
 local function show_card(card)
     local full=Viewer:new {card=card}
     UI:show(full)

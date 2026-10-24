@@ -38,18 +38,48 @@ function Marker.flash(ui, snapshot)
     end)
     trace("boxes:ready")
     if not ok or #boxes == 0 then return end
+    local Screen = require("device").screen
+    local Geom = require("ui/geometry")
+    local width, height = Screen:getWidth(), Screen:getHeight()
+    local function clipped(rect, w, h)
+        local x, y = math.max(0, math.floor(rect.x)), math.max(0, math.floor(rect.y))
+        local right, bottom = math.min(w, math.ceil(rect.x + rect.w)), math.min(h, math.ceil(rect.y + rect.h))
+        if rect.w > 0 and rect.h > 0 and right > x and bottom > y then
+            return Geom:new {x=x, y=y, w=right-x, h=bottom-y}
+        end
+    end
+    local regions = {}
+    for _, rect in ipairs(boxes) do
+        local region = clipped(rect, width, height)
+        if region then regions[#regions+1] = region end
+    end
+    if #regions == 0 then return end
+    boxes = regions
+    local function refresh()
+        for _, rect in ipairs(boxes) do
+            local region = clipped(rect, Screen:getWidth(), Screen:getHeight())
+            -- "partial" counts towards KOReader's periodic full-screen flash.
+            -- UI refreshes keep the same text fidelity without that promotion.
+            -- Keep separate segments: their union could cover most of the page.
+            if region then UI:setDirty(ui, "ui", region) end
+        end
+    end
     local marker = {visible = false, ticks = 0}
     local function valid()
         local now = view.state or {}
         return A.same_book(ui, snapshot) and now.page == page and now.pos == pos
             and now.zoom == zoom and now.rotation == rotation
+            and Screen:getWidth() == width and Screen:getHeight() == height
     end
     function marker:finish()
         if self.finished then return end
         self.finished = true
         if UI.unschedule then UI:unschedule(self.tick) end
         if view.view_modules.ankivocab_return == self then view.view_modules.ankivocab_return = nil end
-        if ui.document and not ui.tearing_down then UI:setDirty(ui, "partial") end
+        if self.visible and ui.document and not ui.tearing_down then
+            self.visible = false
+            refresh()
+        end
     end
     function marker:paintTo(bb)
         if not self.visible or not valid() then return end
@@ -67,7 +97,7 @@ function Marker.flash(ui, snapshot)
         if not valid() or marker.ticks == 4 then marker:finish(); return end
         marker.ticks = marker.ticks + 1
         marker.visible = not marker.visible
-        UI:setDirty(ui, "partial")
+        refresh()
         UI:scheduleIn(0.35, marker.tick)
     end
     view:registerViewModule("ankivocab_return", marker)

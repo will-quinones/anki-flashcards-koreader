@@ -1,5 +1,25 @@
 # Cambios locales
 
+## Parpadeo localizado al volver a la lectura (2026-10-23)
+
+El marcador de retorno solicita refrescos `ui` con los rectángulos concretos
+de la selección, en lugar de `partial` sin región. Así cada cambio del parpadeo
+queda limitado al texto y no avanza el contador de limpieza completa de KOReader.
+Las frases de varias líneas conservan sus segmentos por separado y se recortan
+al área visible, con coordenadas enteras que cubren los bordes de PDF ampliados.
+La limpieza final solo refresca si el marcador sigue visible; no hay un quinto
+refresco después de los dos parpadeos ni al cancelar antes de dibujar.
+
+La regresión de EPUB/PDF comprueba las áreas exactas, los fragmentos separados,
+los límites de pantalla, el modo sin promoción a limpieza completa y la
+cancelación al cambiar página, tamaño de pantalla o cerrar el documento.
+La prueba nativa usa posiciones reales de CRe e inversión de píxeles con
+Blitbuffer fuera de pantalla, sin utilizar el framebuffer físico.
+Validación: 61/61 pruebas locales y las 46 pruebas Lua del Kobo, además de todos
+los escenarios nativos. El servidor TLS sintético desactiva la agrupación TCP
+para no añadir esperas incidentales; se conservan la espera explícita de 23
+segundos, el volumen de SSE y los límites de las comprobaciones existentes.
+
 ## Catálogos y búsqueda como Anki AI Tutor (2026-10-23)
 
 El selector se guía por el navegador de modelos de Anki AI Tutor: carga explícita

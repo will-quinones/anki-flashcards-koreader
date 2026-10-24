@@ -26,6 +26,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # Each TLS/SSE write must leave promptly. The explicit 23-second delay
+    # below tests first-byte timeout; incidental TCP batching must not add more.
+    disable_nagle_algorithm = True
 
     def log_message(self, *args):
         pass
@@ -181,7 +184,8 @@ cd {shlex.quote(args.koreader)}
             if "NATIVE_" in line or "DEVICE_LUA_TESTS_PASS_" in line:
                 print(line, flush=True)
         expected = {"NATIVE_IN_PLACE_RENDER_PASS", "NATIVE_TRANSPORT_RETRY_PASS", "NATIVE_DELAYED_FIRST_BYTE_PASS", "NATIVE_AI_SETTINGS_PASS",
-                    "NATIVE_LEARN_STREAMING_PASS", "NATIVE_CANCELLATION_PASS", "NATIVE_MODEL_CATALOG_PASS"}
+                    "NATIVE_LEARN_STREAMING_PASS", "NATIVE_CANCELLATION_PASS", "NATIVE_MODEL_CATALOG_PASS",
+                    "NATIVE_READING_MARKER_REGIONS_PASS"}
         assert expected.issubset(set(result.stdout.splitlines()))
         return 0
     finally:
