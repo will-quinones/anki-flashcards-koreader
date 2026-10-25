@@ -1,6 +1,7 @@
 -- Briefly invert only the source text. This view module never changes the
 -- reader's selection, annotations, current page or document rendering state.
 local Marker = {}
+local FLASH_TOGGLES = 6 -- three complete on/off flashes
 local logger_ok, logger = pcall(require, "logger")
 local function trace(phase)
     if logger_ok then logger.info("Anki reading marker:", phase) end
@@ -94,7 +95,7 @@ function Marker.flash(ui, snapshot)
     end
     marker.tick = function()
         if marker.finished then return end
-        if not valid() or marker.ticks == 4 then marker:finish(); return end
+        if not valid() or marker.ticks == FLASH_TOGGLES then marker:finish(); return end
         marker.ticks = marker.ticks + 1
         marker.visible = not marker.visible
         refresh()

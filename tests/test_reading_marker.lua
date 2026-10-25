@@ -40,7 +40,7 @@ local function step()
 end
 Marker.flash(ui,snapshot)
 while #queue>0 do step() end
-assert(paints==2 and redraws==4 and not ui.view.view_modules.ankivocab_return)
+assert(paints==3 and redraws==6 and not ui.view.view_modules.ankivocab_return)
 for _,request in ipairs(requests) do
     local r=request.region
     assert(request.widget==ui and r.x==10 and r.y==20 and r.w==80 and r.h==12)
@@ -66,7 +66,7 @@ snapshot.selection={pos0={page=2},pos1={page=2},pboxes={{x=10,y=20,w=80,h=12}}}
 ui.document.getPageBoxesFromPositions=function(_,page,a,b) assert(page==2 and a.page==2); return snapshot.selection.pboxes end
 Marker.flash(ui,snapshot)
 while #queue>0 do step() end
-assert(paints==before+3 and ui.highlight.selected_text==selected)
+assert(paints==before+4 and ui.highlight.selected_text==selected)
 local r=requests[#requests].region
 assert(r.x==15 and r.y==25 and r.w==80 and r.h==12) -- PDF screen transform.
 
@@ -80,7 +80,7 @@ source_boxes={{x=-4.5,y=18.4,w=40.7,h=12.2},{x=600.6,y=45.2,w=250,h=14.1},
 requests={}; redraw_before=redraws
 Marker.flash(ui,snapshot)
 while #queue>0 do step() end
-assert(#requests==8 and redraws==redraw_before+8)
+assert(#requests==12 and redraws==redraw_before+12)
 for i,request in ipairs(requests) do
     local box=request.region
     if i%2==1 then assert(box.x==0 and box.y==18 and box.w==37 and box.h==13)
