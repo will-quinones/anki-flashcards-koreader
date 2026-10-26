@@ -186,7 +186,7 @@ local function current_book_title(opts)
     local document = opts and opts.ui and opts.ui.document
     if not document or not document.getProps then return nil end
     local ok, props = pcall(document.getProps, document)
-    if not (ok and props and props.title and props.title ~= "") then return nil end
+    if not (ok and props and type(props.title) == "string" and props.title ~= "") then return nil end
     local title = props.title:gsub("[\r\n]+", " "):match("^%s*(.-)%s*$")
     if #title > 100 then title = title:sub(1, 100) end
     return title ~= "" and title or nil
@@ -526,62 +526,166 @@ CardManager.show_stats = show_stats
 
 -- ── Card list with optional book filter ───────────────────────────────────────
 
-function CardManager.show(base_config, filter_book, ui, target, on_back)
+local SORT_LABELS = {
+    newest = _("Más recientes"),
+    oldest = _("Más antiguas"),
+    alpha = _("A–Z"),
+}
+
+local function card_added_order(card, index)
+    local created_at = tonumber(card.created_at)
+    local day
+    if created_at then
+        local ok, value = pcall(os.date, "%Y-%m-%d", created_at)
+        if ok then day = value else created_at = nil end
+    elseif type(card.date) == "string" then
+        day = card.date:match("^(%d%d%d%d%-%d%d%-%d%d)")
+    end
+    return {day = day, timestamp = created_at, index = index}
+end
+
+local function newer_first(left, right)
+    if left.order.day ~= right.order.day then
+        if not left.order.day then return false end
+        if not right.order.day then return true end
+        return left.order.day > right.order.day
+    end
+    if left.order.timestamp and right.order.timestamp
+        and left.order.timestamp ~= right.order.timestamp then
+        return left.order.timestamp > right.order.timestamp
+    end
+    -- Legacy cards have only a calendar date. They were appended as they were
+    -- added, so preserve that order within the same day.
+    return left.order.index > right.order.index
+end
+
+local function card_sort_text(card)
+    local text = card.kind == "learn" and (card.question or card.phrase) or card.phrase
+    return type(text) == "string" and text:lower() or ""
+end
+
+function CardManager.show(base_config, filter_book, ui, target, on_back, options)
+    options = options or {}
+    local current_book = options.current_book or current_book_title({ui = ui})
+    local scope_mode = options.scope_mode
+    local sort_mode = options.sort_mode or "newest"
+    if not SORT_LABELS[sort_mode] then sort_mode = "newest" end
+    if options.auto_current_book and not filter_book then
+        filter_book = current_book
+        scope_mode = filter_book and "current" or "all"
+    elseif not scope_mode then
+        scope_mode = filter_book and (filter_book == current_book and "current" or "book") or "all"
+    end
+    if scope_mode == "all" then filter_book = nil end
+    if scope_mode == "current" and current_book then filter_book = current_book end
     local anki_config = effective_config(base_config)
     local menu_instance
 
     local function refresh()
         if menu_instance then UIManager:close(menu_instance) end
-        CardManager.show(base_config, filter_book, ui, nil, on_back)
+        CardManager.show(base_config, filter_book, ui, nil, on_back, {
+            current_book = current_book, scope_mode = scope_mode, sort_mode = sort_mode,
+        })
     end
 
     local all_cards  = CardStorage.load_cards()
     local item_table = {}
 
-    -- ── Filter entry ──────────────────────────────────────────────────────────
-    local filter_label = filter_book
-                         and (_("Libro: ") .. filter_book .. _(" (toca para ver todos)"))
-                         or  _("Libro: todos · Learn y Vocab")
+    local function reopen_list(next_book, next_scope, next_sort, dialog)
+        UIManager:close(dialog)
+        if menu_instance then UIManager:close(menu_instance) end
+        CardManager.show(base_config, next_book, ui, nil, on_back, {
+            current_book = current_book, scope_mode = next_scope, sort_mode = next_sort,
+        })
+    end
+
+    local function choose_book(dialog)
+        UIManager:close(dialog)
+        local books, seen = {}, {}
+        for _, card in ipairs(all_cards) do
+            local title = card.book_title
+            if type(title) == "string" and title ~= "" and not seen[title] then
+                seen[title] = true
+                books[#books+1] = title
+            end
+        end
+        table.sort(books, function(left, right) return left:lower() < right:lower() end)
+        local picker
+        local book_buttons = {}
+        for _, title in ipairs(books) do
+            local selected = title
+            table.insert(book_buttons, {{ text = selected, callback = function()
+                UIManager:close(picker)
+                if menu_instance then UIManager:close(menu_instance) end
+                CardManager.show(base_config, selected, ui, nil, on_back, {
+                    current_book = current_book, scope_mode = "book", sort_mode = sort_mode,
+                })
+            end }})
+        end
+        table.insert(book_buttons, {{ text = _("Cancelar"),
+            callback = function() UIManager:close(picker) end }})
+        picker = ButtonDialog:new {title = _("Elegir libro"), buttons = book_buttons}
+        UIManager:show(picker)
+    end
+
+    -- ── Filter and sort controls ───────────────────────────────────────────────
+    local filter_label
+    if scope_mode == "current" and filter_book then
+        filter_label = _("Libro actual: ") .. filter_book
+    elseif filter_book then
+        filter_label = _("Libro: ") .. filter_book
+    else
+        filter_label = _("Libro: todos")
+    end
     table.insert(item_table, {
         text = filter_label,
         bold = true,
         callback = function()
-            if filter_book then
-                -- Clear filter.
-                if menu_instance then UIManager:close(menu_instance) end
-                CardManager.show(base_config, nil, ui, nil, on_back)
-                return
-            end
-            -- Build book picker from stored cards.
-            local books, seen = {}, {}
-            for _i, card in ipairs(all_cards) do
-                local t = (card.book_title and card.book_title ~= "")
-                          and card.book_title or _("Unknown book")
-                if not seen[t] then seen[t] = true; table.insert(books, t) end
-            end
-            local picker
-            local book_buttons = {}
-            for _i, b in ipairs(books) do
-                local bref = b
-                table.insert(book_buttons, {{ text = bref, callback = function()
-                    UIManager:close(picker)
-                    if menu_instance then UIManager:close(menu_instance) end
-                    CardManager.show(base_config, bref, ui, nil, on_back)
+            local choices
+            local buttons = {}
+            if current_book then
+                table.insert(buttons, {{ text = (scope_mode == "current" and "✓ " or "")
+                    .. _("Solo el libro actual: ") .. current_book, callback = function()
+                    reopen_list(current_book, "current", sort_mode, choices)
                 end }})
             end
-            table.insert(book_buttons, {{ text = _("Cancel"),
-                callback = function() UIManager:close(picker) end }})
-            picker = ButtonDialog:new {
-                title   = _("Filter by Book"),
-                buttons = book_buttons,
-            }
-            UIManager:show(picker)
+            table.insert(buttons, {{ text = (scope_mode == "all" and "✓ " or "")
+                .. _("Todos los libros"), callback = function()
+                reopen_list(nil, "all", sort_mode, choices)
+            end }})
+            table.insert(buttons, {{ text = _("Elegir otro libro…"), callback = function()
+                choose_book(choices)
+            end }})
+            table.insert(buttons, {{ text = _("Cancelar"), callback = function()
+                UIManager:close(choices)
+            end }})
+            choices = ButtonDialog:new {title = _("Filtrar tarjetas"), buttons = buttons}
+            UIManager:show(choices)
+        end,
+    })
+    table.insert(item_table, {
+        text = _("Orden: ") .. SORT_LABELS[sort_mode],
+        bold = true,
+        callback = function()
+            local choices
+            local buttons = {}
+            for _, mode in ipairs({"newest", "oldest", "alpha"}) do
+                local selected_mode = mode
+                table.insert(buttons, {{ text = (sort_mode == selected_mode and "✓ " or "")
+                    .. SORT_LABELS[selected_mode], callback = function()
+                    reopen_list(filter_book, scope_mode, selected_mode, choices)
+                end }})
+            end
+            table.insert(buttons, {{ text = _("Cancelar"), callback = function()
+                UIManager:close(choices)
+            end }})
+            choices = ButtonDialog:new {title = _("Ordenar tarjetas"), buttons = buttons}
+            UIManager:show(choices)
         end,
     })
 
     -- ── Filtered card list ────────────────────────────────────────────────────
-    local cards = {}
-    local source_indices = {}
+    local card_entries = {}
     local function matches_target(card)
         if not target then return true end
         if (target.kind == "learn") ~= (card.kind == "learn") then return false end
@@ -594,9 +698,24 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
     end
     for source_index, card in ipairs(all_cards) do
         if (not filter_book or card.book_title == filter_book) and matches_target(card) then
-            table.insert(cards, card)
-            source_indices[#cards] = source_index
+            card_entries[#card_entries+1] = {
+                card = card, source_index = source_index,
+                order = card_added_order(card, source_index),
+            }
         end
+    end
+    table.sort(card_entries, function(left, right)
+        if sort_mode == "alpha" then
+            local left_text, right_text = card_sort_text(left.card), card_sort_text(right.card)
+            if left_text ~= right_text then return left_text < right_text end
+            return newer_first(left, right)
+        end
+        if sort_mode == "oldest" then return newer_first(right, left) end
+        return newer_first(left, right)
+    end)
+    local cards, source_indices = {}, {}
+    for index, entry in ipairs(card_entries) do
+        cards[index], source_indices[index] = entry.card, entry.source_index
     end
 
     if #cards == 0 then
@@ -952,7 +1071,9 @@ function CardManager.show(base_config, filter_book, ui, target, on_back)
         is_borderless = true,
         onReturn = function(self)
             UIManager:close(self)
-            if filter_book then CardManager.show(base_config, nil, ui, nil, on_back)
+            if filter_book then CardManager.show(base_config, nil, ui, nil, on_back, {
+                current_book = current_book, scope_mode = "all", sort_mode = sort_mode,
+            })
             elseif on_back then on_back() end
         end,
         items_per_page = ListRows.per_page(),

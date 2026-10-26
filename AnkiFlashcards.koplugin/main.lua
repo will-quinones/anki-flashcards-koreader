@@ -624,7 +624,8 @@ function AnkiFlashcards:addToMainMenu(menu_items)
                         text = _("Mis tarjetas"),
                         keep_menu_open = true,
                         callback = function()
-                            CardManager.show(CONFIGURATION, nil, self.ui)
+                            CardManager.show(CONFIGURATION, nil, self.ui, nil, nil,
+                                {auto_current_book = true})
                         end,
                     })
                     return items

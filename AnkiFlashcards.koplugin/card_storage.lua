@@ -238,6 +238,7 @@ function CardStorage.save_card(card)
         origin_key = card.origin_key,
         selected_text = card.selected_text,
         date           = os.date("%Y-%m-%d"),
+        created_at     = os.time(),
         updated_at     = os.time(),
         sent_to_anki   = false,
     }
@@ -615,6 +616,7 @@ local function copy_learning(card)
     end
     result.image_path, result.image_prompt = "", ""
     result.date = card.date or os.date("%Y-%m-%d")
+    result.created_at = card.created_at or os.time()
     result.updated_at = os.time()
     return result
 end
@@ -630,7 +632,13 @@ function CardStorage.save_learning_card(card, overwrite)
         if entry.kind == "learn" and entry.card_id == card.card_id then
             if not overwrite then return false, "already_saved" end
             if entry.sent_to_anki then return false, "already_sent" end
-            entries[i] = copy_learning(card)
+            local replacement = copy_learning(card)
+            -- Regeneration/editing must not move an existing card to the top
+            -- of the "newest" list. Legacy cards without this field keep
+            -- using their stored calendar date as the fallback sort key.
+            replacement.created_at = entry.created_at or card.created_at
+            replacement.date = entry.date or card.date or replacement.date
+            entries[i] = replacement
             return save_raw(entries)
         end
     end
@@ -740,6 +748,7 @@ function CardStorage.import_anki_card(card)
     for k, v in pairs(card) do imported[k] = v end
     imported.sent_to_anki = true
     imported.date = imported.date or os.date("%Y-%m-%d")
+    imported.created_at = os.time()
     imported.updated_at = os.time()
     entries[#entries+1] = imported
     return save_raw(entries)
@@ -780,6 +789,7 @@ function CardStorage.record_sent(card, receipt)
             target[field] = card[field]
         end
         target.date = os.date("%Y-%m-%d")
+        target.created_at = os.time()
         entries[#entries+1] = target
     end
     target.sent_to_anki = true

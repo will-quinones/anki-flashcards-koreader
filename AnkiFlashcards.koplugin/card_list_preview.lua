@@ -14,8 +14,15 @@ function Preview.fragment(card)
     return card.kind ~= "learn" and line(card.phrase) or ""
 end
 function Preview.parts(card, prefix)
+    local heading_text
+    if card.kind == "learn" then
+        heading_text = card.question or card.phrase
+    else
+        heading_text = card.definition
+        if line(heading_text) == "" then heading_text = card.phrase end
+    end
     local heading = prefix .. (card.kind == "learn" and "[Learn] " or "[Vocab] ")
-        .. line(card.kind == "learn" and (card.question or card.phrase) or card.phrase)
+        .. line(heading_text)
     local fragment = Preview.fragment(card)
     local book = line(card.book_title)
     if book == "" then book = "Libro desconocido" end
