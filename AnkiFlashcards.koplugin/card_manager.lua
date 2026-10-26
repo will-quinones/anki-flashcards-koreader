@@ -637,8 +637,10 @@ function CardManager.show(base_config, filter_book, ui, target, on_back, options
     else
         filter_label = _("Libro: todos")
     end
+    local order_label = _("Orden: ") .. SORT_LABELS[sort_mode]
     table.insert(item_table, {
-        text = filter_label,
+        text = filter_label .. "\n" .. order_label,
+        card_preview = {filter_label, order_label},
         bold = true,
         callback = function()
             local choices
@@ -656,19 +658,6 @@ function CardManager.show(base_config, filter_book, ui, target, on_back, options
             table.insert(buttons, {{ text = _("Elegir otro libro…"), callback = function()
                 choose_book(choices)
             end }})
-            table.insert(buttons, {{ text = _("Cancelar"), callback = function()
-                UIManager:close(choices)
-            end }})
-            choices = ButtonDialog:new {title = _("Filtrar tarjetas"), buttons = buttons}
-            UIManager:show(choices)
-        end,
-    })
-    table.insert(item_table, {
-        text = _("Orden: ") .. SORT_LABELS[sort_mode],
-        bold = true,
-        callback = function()
-            local choices
-            local buttons = {}
             for _, mode in ipairs({"newest", "oldest", "alpha"}) do
                 local selected_mode = mode
                 table.insert(buttons, {{ text = (sort_mode == selected_mode and "✓ " or "")
@@ -679,7 +668,7 @@ function CardManager.show(base_config, filter_book, ui, target, on_back, options
             table.insert(buttons, {{ text = _("Cancelar"), callback = function()
                 UIManager:close(choices)
             end }})
-            choices = ButtonDialog:new {title = _("Ordenar tarjetas"), buttons = buttons}
+            choices = ButtonDialog:new {title = _("Filtro y orden"), buttons = buttons}
             UIManager:show(choices)
         end,
     })

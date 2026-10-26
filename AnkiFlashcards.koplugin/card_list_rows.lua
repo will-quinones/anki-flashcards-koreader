@@ -31,8 +31,9 @@ function Rows.render(menu)
             local Span = require("ui/widget/horizontalspan")
             local indent = (item.entry.indent or 0) + (item.state_w or 0)
             local width = math.max(1, item.content_width - indent)
+            local sizes = #parts == 2 and {font_sizes[1], font_sizes[2]} or font_sizes
             local lines = Vertical:new {align = "left"}
-            for i, size in ipairs(font_sizes) do
+            for i, size in ipairs(sizes) do
                 lines[#lines+1] = Text:new {text = parts[i], face = Font:getFace("smallinfofont", size),
                     max_width = width, bold = i == 1 and item.bold or false}
             end

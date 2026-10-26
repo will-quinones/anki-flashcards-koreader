@@ -4,6 +4,10 @@ local function line(value)
     return type(value) == "string" and value:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 end
 function Preview.fragment(card)
+    if card.kind ~= "learn" then
+        local definition = line(card.definition)
+        if definition ~= "" then return definition end
+    end
     local selected = line(card.selected_text)
     if selected ~= "" then return selected end
     local source = card.annotation_source
@@ -14,15 +18,8 @@ function Preview.fragment(card)
     return card.kind ~= "learn" and line(card.phrase) or ""
 end
 function Preview.parts(card, prefix)
-    local heading_text
-    if card.kind == "learn" then
-        heading_text = card.question or card.phrase
-    else
-        heading_text = card.definition
-        if line(heading_text) == "" then heading_text = card.phrase end
-    end
     local heading = prefix .. (card.kind == "learn" and "[Learn] " or "[Vocab] ")
-        .. line(heading_text)
+        .. line(card.kind == "learn" and (card.question or card.phrase) or card.phrase)
     local fragment = Preview.fragment(card)
     local book = line(card.book_title)
     if book == "" then book = "Libro desconocido" end

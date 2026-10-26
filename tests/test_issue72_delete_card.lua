@@ -151,7 +151,7 @@ do
     local function start_delete(manager)
         manager.show({}, "Target Book")
         local list = state.shown[#state.shown]
-        list.item_table[3].hold_callback()
+        list.item_table[2].hold_callback()
         local actions = state.shown[#state.shown]
         actions.buttons[2][1].callback()
         local confirm = state.shown[#state.shown]
@@ -227,7 +227,7 @@ do
     package.preload["settings_viewer"] = function() return { show = function() end } end
     local manager = require("card_manager")
     manager.show({})
-    shown[#shown].item_table[3].callback()
+    shown[#shown].item_table[2].callback()
     local initial_viewer = viewer_options
     initial_viewer.on_regen_text()
     assert(viewer_options == initial_viewer and viewer_options.card.text == "old text"
@@ -295,7 +295,7 @@ do
 
     local manager = require("card_manager")
     manager.show({})
-    shown[#shown].item_table[3].callback()
+    shown[#shown].item_table[2].callback()
     assert(viewer_options, "My Cards must open a card viewer")
     assert(viewer_options.on_prepare_update(viewer_options.card),
            "My Cards must migrate a legacy identity before phrase mutation")
@@ -375,7 +375,7 @@ do
     package.preload["settings_viewer"] = function() return { show = function() end } end
     local manager = require("card_manager")
     manager.show({})
-    shown[#shown].item_table[3].callback()
+    shown[#shown].item_table[2].callback()
     assert(#image_callbacks == 1 and #audio_callbacks == 1,
            "My Cards must start pending image and audio callbacks")
     viewer_options.card.phrase = "my edited"

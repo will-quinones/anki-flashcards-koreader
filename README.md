@@ -169,15 +169,15 @@ al elegir explícitamente la acción Anki correspondiente.
    inexistentes de tarjetas recuperadas desde Anki.
 6. Abre **Mis tarjetas** para revisar, filtrar por libro, enviar o eliminar
    tarjetas. Si la abres desde un libro, empieza filtrada por ese libro; desde
-   el filtro puedes pasar a todos los libros o elegir otro. La segunda fila
-   permite cambiar el orden; empieza por fecha de creación,
+   el filtro puedes pasar a todos los libros o elegir otro. En la misma fila,
+   debajo del filtro, aparece el orden; empieza por fecha de creación,
    de más reciente a más antigua, y también puedes elegir más antiguas o A–Z.
    Las tarjetas nuevas guardan la hora de creación;
    las tarjetas antiguas usan su fecha y el orden en que se guardaron.
    El título indica visibles/total.
-   La lista distingue `[Vocab]` y `[Learn]`: Vocab muestra la definición en la
-   primera línea y Learn su pregunta. El fragmento original aparece en una segunda
-   línea más pequeña; debajo aparecen el libro y la fecha.
+   La lista distingue `[Vocab]` y `[Learn]`: Vocab muestra la palabra en la
+   primera línea y su definición entre «» en la segunda; Learn muestra su pregunta
+   y el fragmento original. Debajo aparecen el libro y la fecha.
    **↗** indica enviada a Anki y **○**, guardada solo en el Kobo (último estado confirmado).
    Las listas no tienen borde exterior y usan la flecha de retorno nativa para
    volver al apartado anterior, conservando el menú principal abierto.
